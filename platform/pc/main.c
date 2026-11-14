@@ -63,8 +63,11 @@ static const unsigned char FONT[95][5] = {
     {0x00,0x41,0x36,0x08,0x00},{0x02,0x01,0x02,0x04,0x02},
 };
 
-/* Lee el siguiente carácter de una cadena UTF-8 y lo reduce a ASCII
- * (á->a, ñ->n, ¿->?, ¡->!) porque la fuente solo tiene ASCII. */
+/* Lee el siguiente carácter de una cadena UTF-8. Devuelve ASCII, o un código
+ * (acento << 8 | letra) para á é í ó ú ñ ü (acento 1 = tilde, 2 = ñ, 3 = diéresis),
+ * o 0x400 / 0x401 para ¿ ¡. La fuente solo tiene ASCII; los acentos se dibujan encima. */
+#define CH_QUESTION_INV 0x400
+#define CH_EXCLAM_INV   0x401
 static int next_char(const unsigned char **pp) {
     const unsigned char *p = *pp;
     int c = *p;
@@ -74,15 +77,16 @@ static int next_char(const unsigned char **pp) {
     if (c == 0xC3) {
         static const char lo_b[] = "\xA1\xA9\xAD\xB3\xBA\xB1\xBC", lo_a[] = "aeiounu";
         static const char up_b[] = "\x81\x89\x8D\x93\x9A\x91\x9C", up_a[] = "AEIOUNU";
+        static const int acc[7] = { 1, 1, 1, 1, 1, 2, 3 };
         const char *q;
         *pp = p + 2;
-        if ((q = strchr(lo_b, p[1])) != NULL) return lo_a[q - lo_b];
-        if ((q = strchr(up_b, p[1])) != NULL) return up_a[q - up_b];
+        if ((q = strchr(lo_b, p[1])) != NULL) return (acc[q - lo_b] << 8) | lo_a[q - lo_b];
+        if ((q = strchr(up_b, p[1])) != NULL) return (acc[q - up_b] << 8) | up_a[q - up_b];
         return '?';
     }
     if (c == 0xC2) {
         *pp = p + 2;
-        return p[1] == 0xBF ? '?' : (p[1] == 0xA1 ? '!' : ' ');
+        return p[1] == 0xBF ? CH_QUESTION_INV : (p[1] == 0xA1 ? CH_EXCLAM_INV : ' ');
     }
     *pp = p + 1;
     while ((**pp & 0xC0) == 0x80) (*pp)++;
@@ -105,14 +109,28 @@ static void draw_text(SDL_Renderer *r, const char *s, int x, int y, int sc, unsi
     int c;
     setc(r, col);
     while ((c = next_char(&p)) != 0) {
-        if (c < 32 || c > 126) c = '?';
-        const unsigned char *g = FONT[c - 32];
+        int base = c & 0xFF, acc = (c >> 8) & 3, flip = 0;
+        if (c >= CH_QUESTION_INV) { base = c == CH_QUESTION_INV ? '?' : '!'; acc = 0; flip = 1; }
+        if (base < 32 || base > 126) base = '?';
+        const unsigned char *g = FONT[base - 32];
         for (int cx = 0; cx < 5; cx++)
-            for (int cy = 0; cy < 8; cy++)
-                if ((g[cx] >> cy) & 1) {
+            for (int cy = 0; cy < 8; cy++) {
+                int src = flip ? 6 - cy : cy;
+                if (src >= 0 && (g[cx] >> src) & 1) {
                     SDL_Rect q = { x + cx * sc, y + cy * sc, sc, sc };
                     SDL_RenderFillRect(r, &q);
                 }
+            }
+        if (acc) { /* marca del acento encima de la letra (más arriba si es mayúscula) */
+            static const int AC[4][3][2] = { {{0}}, { {3,0}, {2,1}, {-1,-1} },
+                                             { {1,1}, {2,0}, {3,1} }, { {1,0}, {3,0}, {-1,-1} } };
+            int top = (base >= 'A' && base <= 'Z') ? -2 : 0;
+            for (int k = 0; k < 3; k++) {
+                if (AC[acc][k][0] < 0) continue;
+                SDL_Rect q = { x + AC[acc][k][0] * sc, y + (AC[acc][k][1] + top) * sc, sc, sc };
+                SDL_RenderFillRect(r, &q);
+            }
+        }
         x += 6 * sc;
     }
 }
@@ -291,9 +309,9 @@ static void act_lang(Game *g) {
 
 /* ------------------------------------------------------------------ pintado */
 static void draw_background(SDL_Renderer *r) {
-    for (int y = 0; y < H; y += 4) {
-        int t = y * 60 / H;
-        fill_rect(r, 0, y, W, 4, 0xA8DCF5 - ((unsigned)t << 8) - ((unsigned)t << 16) / 2);
+    for (int y = 0; y < H; y += 4) { /* cielo: azul que aclara hacia el horizonte */
+        unsigned rr = 0x90 + (unsigned)(y * 0x50 / H), gg = 0xD0 + (unsigned)(y * 0x28 / H), bb = 0xF5 + (unsigned)(y * 0x0A / H);
+        fill_rect(r, 0, y, W, 4, (rr << 16) | (gg << 8) | bb);
     }
     setc(r, 0x8BC34A);
     fill_ellipse(r, 90, 250, 190, 40);
@@ -452,7 +470,10 @@ static void on_click(Game *g, int x, int y) {
 
 /* ------------------------------------------------------------------ prueba automática */
 static void save_shot(SDL_Renderer *ren, const char *name) {
-    SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, W, H, 32, SDL_PIXELFORMAT_ARGB8888);
+    /* SDL lee la salida real (ventana), no el tamaño lógico: hay que pedirlo */
+    int ow = W, oh = H;
+    SDL_GetRendererOutputSize(ren, &ow, &oh);
+    SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, ow, oh, 32, SDL_PIXELFORMAT_ARGB8888);
     if (!s) return;
     if (SDL_RenderReadPixels(ren, NULL, SDL_PIXELFORMAT_ARGB8888, s->pixels, s->pitch) == 0)
         SDL_SaveBMP(s, name);
@@ -494,6 +515,7 @@ static int run_smoke(SDL_Renderer *ren, Game *g) {
 
 int main(int argc, char **argv) {
     int smoke = argc > 1 && strcmp(argv[1], "--smoke") == 0;
+    if (smoke) setvbuf(stdout, NULL, _IONBF, 0); /* que el log de CI no se pierda si algo falla */
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK) != 0) {
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return 1;
