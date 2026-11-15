@@ -15,7 +15,7 @@ jobs:
       - run: make pc
       - name: Prueba automática (sin pantalla) y capturas
         run: |
-          SDL_VIDEODRIVER=dummy ./bolitas_pc --smoke
+          SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy ./bolitas_pc --smoke
           mogrify -format png shot_*.bmp || true
       - uses: actions/upload-artifact@v4
         with:
