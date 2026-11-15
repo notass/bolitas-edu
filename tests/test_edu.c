@@ -43,6 +43,42 @@ int main(void) {
             char buf[24]; snprintf(buf, sizeof buf, "%d:%02d", r.visual_a, r.visual_b);
             CHECK(strcmp(buf, r.option[r.correct]) == 0, "hora");
             break; }
+        case MG_MAYOR: {
+            int best = 0, v[4];
+            for (int i = 0; i < 4; i++) v[i] = atoi(r.option[i]);
+            for (int i = 1; i < 4; i++) if (r.visual_a ? v[i] > v[best] : v[i] < v[best]) best = i;
+            CHECK(r.correct == best, "mayor/menor: %s", r.prompt);
+            break; }
+        case MG_COLORES:
+            CHECK(strcmp(r.option[r.correct], edu_color_name(r.visual_a, (Lang)lang)) == 0, "color");
+            CHECK(r.visual_a < (level == 1 ? 4 : (level == 2 ? 6 : 8)), "color fuera del nivel");
+            break;
+        case MG_FORMAS:
+            CHECK(strcmp(r.option[r.correct], edu_shape_name(r.visual_a, (Lang)lang)) == 0, "figura");
+            CHECK(r.visual_a < level + 2, "figura fuera del nivel");
+            break;
+        case MG_LETRA: {
+            char w[32]; int len;
+            CHECK(sscanf(strchr(r.prompt, '"'), "\"%31[^\"]\"", w) == 1, "letra: %s", r.prompt);
+            len = (int)strlen(w);
+            char c = (char)((r.visual_a ? w[len - 1] : w[0]) - 'a' + 'A');
+            CHECK(r.option[r.correct][0] == c && r.option[r.correct][1] == 0, "letra %c: %s", c, r.prompt);
+            break; }
+        case MG_DIAS: {
+            static const char *D[2][7] = {
+                {"lunes","martes","miércoles","jueves","viernes","sábado","domingo"},
+                {"Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"} };
+            static const char *M[2][12] = {
+                {"enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"},
+                {"January","February","March","April","May","June","July","August","September","October","November","December"} };
+            int months = r.visual_b >> 1, after = r.visual_b & 1, n = months ? 12 : 7;
+            const char *base = months ? M[lang][r.visual_a] : D[lang][r.visual_a];
+            const char *want = months ? M[lang][(r.visual_a + (after ? 1 : n - 1)) % n]
+                                      : D[lang][(r.visual_a + (after ? 1 : n - 1)) % n];
+            CHECK(strstr(r.prompt, base) != NULL, "dias: falta '%s' en %s", base, r.prompt);
+            CHECK(strcmp(r.option[r.correct], want) == 0, "dias: %s -> %s", r.prompt, r.option[r.correct]);
+            CHECK(months == (level == 3), "dias/meses por nivel");
+            break; }
         default: break;
         }
     }

@@ -3,6 +3,7 @@
 #ifndef EDU_H
 #define EDU_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #define EDU_OPTIONS 4
@@ -18,8 +19,24 @@ typedef enum {
     MG_SILABAS,  /* sílabas -> lectura */
     MG_VOCAB,    /* vocabulario ES/EN */
     MG_HORA,     /* leer el reloj     */
+    MG_MAYOR,    /* número mayor/menor */
+    MG_LETRA,    /* letra inicial/final */
+    MG_COLORES,  /* nombre del color  */
+    MG_FORMAS,   /* nombre de la figura */
+    MG_DIAS,     /* días y meses      */
     MG_COUNT
 } MiniGame;
+
+/* Convierte texto UTF-8 a mayúsculas (upper=1) o minúsculas (upper=0), incluidas
+ * á é í ó ú ü ñ. Para alternar cómo se muestra el contenido de aprendizaje. */
+void edu_set_case(char *dst, size_t cap, const char *src, int upper);
+
+/* Colores (8) y figuras (5): tablas bilingües compartidas con el dibujo. */
+int         edu_color_count(void);
+unsigned    edu_color_rgb(int i);                 /* 0xRRGGBB */
+const char *edu_color_name(int i, Lang lang);
+int         edu_shape_count(void);
+const char *edu_shape_name(int i, Lang lang);     /* 0 círculo 1 cuadrado 2 triángulo 3 rectángulo 4 rombo */
 
 typedef struct { uint32_t state; } Rng;
 void     rng_seed(Rng *g, uint32_t seed);

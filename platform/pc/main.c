@@ -1,476 +1,895 @@
-/* Bolitas Edu - prototipo SDL2 (PC / Android / PSP).
- * Pantalla lógica 480x272 (la de la PSP). Sin fuentes ni imágenes externas:
- * todo se dibuja con rectángulos y una fuente bitmap 5x7 incluida.
+/* Bolitas Edu - SDL2 (PC / Android / PSP / Vita).
+ * Todo se dibuja en coordenadas lógicas 480x272 (ver gfx.h).
  *
- *   PC:      1 2 3 4 (o Z X C V) = tambores, flechas + Enter, Esc = atrás, L = idioma
- *   PSP:     Cuadrado/Triángulo/Círculo/Cruz = tambores, Start = menú, L/R = idioma
- *   Android: tocar tambores; botón Atrás = menú
+ * Mandos (PSP / Vita):  cruceta o botones del rombo = opciones en los juegos,
+ *   cruz = elegir, círculo = atrás (menús), Start = menú, Select = MAYÚSCULAS/minúsculas,
+ *   L/R = idioma (menús) o color (colorear).
+ * PC: flechas, Enter, Esc, Tab = Aa, L = idioma, 1-4 / Z X C V = opciones, N / Backspace = colorear.
+ * Táctil / ratón: tocar.
  *
  *   ./bolitas_pc --smoke   -> prueba automática sin jugador (guarda capturas .bmp)
  */
-#if defined(__has_include)
-#  if __has_include(<SDL2/SDL.h>)
-#    include <SDL2/SDL.h>
-#  else
-#    include <SDL.h>
-#  endif
-#else
-#  include <SDL2/SDL.h>
-#endif
+#include "sdl_inc.h"
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "edu.h"
+#include "rhythm.h"
+#include "paint.h"
+#include "gfx.h"
+#include "audio.h"
 
-#define W 480
-#define H 272
-#define PI_F 3.14159265f
+#if defined(__PSP__) || defined(__vita__)
+#  define PSP_LIKE_PAD 1
+#endif
 
-/* ------------------------------------------------------------------ fuente */
-/* Fuente clásica 5x7, ASCII 32..126, columnas (bit0 = arriba). */
-static const unsigned char FONT[95][5] = {
-    {0x00,0x00,0x00,0x00,0x00},{0x00,0x00,0x5F,0x00,0x00},{0x00,0x07,0x00,0x07,0x00},
-    {0x14,0x7F,0x14,0x7F,0x14},{0x24,0x2A,0x7F,0x2A,0x12},{0x23,0x13,0x08,0x64,0x62},
-    {0x36,0x49,0x56,0x20,0x50},{0x00,0x08,0x07,0x03,0x00},{0x00,0x1C,0x22,0x41,0x00},
-    {0x00,0x41,0x22,0x1C,0x00},{0x2A,0x1C,0x7F,0x1C,0x2A},{0x08,0x08,0x3E,0x08,0x08},
-    {0x00,0x80,0x70,0x30,0x00},{0x08,0x08,0x08,0x08,0x08},{0x00,0x00,0x60,0x60,0x00},
-    {0x20,0x10,0x08,0x04,0x02},{0x3E,0x51,0x49,0x45,0x3E},{0x00,0x42,0x7F,0x40,0x00},
-    {0x72,0x49,0x49,0x49,0x46},{0x21,0x41,0x49,0x4D,0x33},{0x18,0x14,0x12,0x7F,0x10},
-    {0x27,0x45,0x45,0x45,0x39},{0x3C,0x4A,0x49,0x49,0x31},{0x41,0x21,0x11,0x09,0x07},
-    {0x36,0x49,0x49,0x49,0x36},{0x46,0x49,0x49,0x29,0x1E},{0x00,0x00,0x14,0x00,0x00},
-    {0x00,0x40,0x34,0x00,0x00},{0x00,0x08,0x14,0x22,0x41},{0x14,0x14,0x14,0x14,0x14},
-    {0x00,0x41,0x22,0x14,0x08},{0x02,0x01,0x59,0x09,0x06},{0x3E,0x41,0x5D,0x59,0x4E},
-    {0x7C,0x12,0x11,0x12,0x7C},{0x7F,0x49,0x49,0x49,0x36},{0x3E,0x41,0x41,0x41,0x22},
-    {0x7F,0x41,0x41,0x41,0x3E},{0x7F,0x49,0x49,0x49,0x41},{0x7F,0x09,0x09,0x09,0x01},
-    {0x3E,0x41,0x41,0x51,0x73},{0x7F,0x08,0x08,0x08,0x7F},{0x00,0x41,0x7F,0x41,0x00},
-    {0x20,0x40,0x41,0x3F,0x01},{0x7F,0x08,0x14,0x22,0x41},{0x7F,0x40,0x40,0x40,0x40},
-    {0x7F,0x02,0x1C,0x02,0x7F},{0x7F,0x04,0x08,0x10,0x7F},{0x3E,0x41,0x41,0x41,0x3E},
-    {0x7F,0x09,0x09,0x09,0x06},{0x3E,0x41,0x51,0x21,0x5E},{0x7F,0x09,0x19,0x29,0x46},
-    {0x26,0x49,0x49,0x49,0x32},{0x03,0x01,0x7F,0x01,0x03},{0x3F,0x40,0x40,0x40,0x3F},
-    {0x1F,0x20,0x40,0x20,0x1F},{0x3F,0x40,0x38,0x40,0x3F},{0x63,0x14,0x08,0x14,0x63},
-    {0x03,0x04,0x78,0x04,0x03},{0x61,0x59,0x49,0x4D,0x43},{0x00,0x7F,0x41,0x41,0x41},
-    {0x02,0x04,0x08,0x10,0x20},{0x00,0x41,0x41,0x41,0x7F},{0x04,0x02,0x01,0x02,0x04},
-    {0x40,0x40,0x40,0x40,0x40},{0x00,0x03,0x07,0x08,0x00},{0x20,0x54,0x54,0x78,0x40},
-    {0x7F,0x28,0x44,0x44,0x38},{0x38,0x44,0x44,0x44,0x28},{0x38,0x44,0x44,0x28,0x7F},
-    {0x38,0x54,0x54,0x54,0x18},{0x00,0x08,0x7E,0x09,0x02},{0x18,0xA4,0xA4,0x9C,0x78},
-    {0x7F,0x08,0x04,0x04,0x78},{0x00,0x44,0x7D,0x40,0x00},{0x20,0x40,0x40,0x3D,0x00},
-    {0x7F,0x10,0x28,0x44,0x00},{0x00,0x41,0x7F,0x40,0x00},{0x7C,0x04,0x78,0x04,0x78},
-    {0x7C,0x08,0x04,0x04,0x78},{0x38,0x44,0x44,0x44,0x38},{0xFC,0x18,0x24,0x24,0x18},
-    {0x18,0x24,0x24,0x18,0xFC},{0x7C,0x08,0x04,0x04,0x08},{0x48,0x54,0x54,0x54,0x24},
-    {0x04,0x04,0x3F,0x44,0x24},{0x3C,0x40,0x40,0x20,0x7C},{0x1C,0x20,0x40,0x20,0x1C},
-    {0x3C,0x40,0x30,0x40,0x3C},{0x44,0x28,0x10,0x28,0x44},{0x4C,0x90,0x90,0x90,0x7C},
-    {0x44,0x64,0x54,0x4C,0x44},{0x00,0x08,0x36,0x41,0x00},{0x00,0x00,0x77,0x00,0x00},
-    {0x00,0x41,0x36,0x08,0x00},{0x02,0x01,0x02,0x04,0x02},
-};
+/* ------------------------------------------------------------------ datos de menú */
+typedef enum { K_QUIZ, K_RHYTHM, K_PAINT } Kind;
+typedef struct { Kind kind; MiniGame mg; } Entry;
 
-/* Lee el siguiente carácter de una cadena UTF-8. Devuelve ASCII, o un código
- * (acento << 8 | letra) para á é í ó ú ñ ü (acento 1 = tilde, 2 = ñ, 3 = diéresis),
- * o 0x400 / 0x401 para ¿ ¡. La fuente solo tiene ASCII; los acentos se dibujan encima. */
-#define CH_QUESTION_INV 0x400
-#define CH_EXCLAM_INV   0x401
-static int next_char(const unsigned char **pp) {
-    const unsigned char *p = *pp;
-    int c = *p;
-    if (c == 0) return 0;
-    if (c < 0x80) { *pp = p + 1; return c; }
-    if (p[1] == 0) { *pp = p + 1; return '?'; }
-    if (c == 0xC3) {
-        static const char lo_b[] = "\xA1\xA9\xAD\xB3\xBA\xB1\xBC", lo_a[] = "aeiounu";
-        static const char up_b[] = "\x81\x89\x8D\x93\x9A\x91\x9C", up_a[] = "AEIOUNU";
-        static const int acc[7] = { 1, 1, 1, 1, 1, 2, 3 };
-        const char *q;
-        *pp = p + 2;
-        if ((q = strchr(lo_b, p[1])) != NULL) return (acc[q - lo_b] << 8) | lo_a[q - lo_b];
-        if ((q = strchr(up_b, p[1])) != NULL) return (acc[q - up_b] << 8) | up_a[q - up_b];
-        return '?';
-    }
-    if (c == 0xC2) {
-        *pp = p + 2;
-        return p[1] == 0xBF ? CH_QUESTION_INV : (p[1] == 0xA1 ? CH_EXCLAM_INV : ' ');
-    }
-    *pp = p + 1;
-    while ((**pp & 0xC0) == 0x80) (*pp)++;
-    return '?';
-}
-
-static int text_width(const char *s, int sc) {
-    const unsigned char *p = (const unsigned char *)s;
-    int n = 0;
-    while (next_char(&p)) n++;
-    return n ? n * 6 * sc - sc : 0;
-}
-
-static void setc(SDL_Renderer *r, unsigned c) {
-    SDL_SetRenderDrawColor(r, (c >> 16) & 255, (c >> 8) & 255, c & 255, 255);
-}
-
-static void draw_text(SDL_Renderer *r, const char *s, int x, int y, int sc, unsigned col) {
-    const unsigned char *p = (const unsigned char *)s;
-    int c;
-    setc(r, col);
-    while ((c = next_char(&p)) != 0) {
-        int base = c & 0xFF, acc = (c >> 8) & 3, flip = 0;
-        if (c >= CH_QUESTION_INV) { base = c == CH_QUESTION_INV ? '?' : '!'; acc = 0; flip = 1; }
-        if (base < 32 || base > 126) base = '?';
-        const unsigned char *g = FONT[base - 32];
-        for (int cx = 0; cx < 5; cx++)
-            for (int cy = 0; cy < 8; cy++) {
-                int src = flip ? 6 - cy : cy;
-                if (src >= 0 && (g[cx] >> src) & 1) {
-                    SDL_Rect q = { x + cx * sc, y + cy * sc, sc, sc };
-                    SDL_RenderFillRect(r, &q);
-                }
-            }
-        if (acc) { /* marca del acento encima de la letra (más arriba si es mayúscula) */
-            static const int AC[4][3][2] = { {{0}}, { {3,0}, {2,1}, {-1,-1} },
-                                             { {1,1}, {2,0}, {3,1} }, { {1,0}, {3,0}, {-1,-1} } };
-            int top = (base >= 'A' && base <= 'Z') ? -2 : 0;
-            for (int k = 0; k < 3; k++) {
-                if (AC[acc][k][0] < 0) continue;
-                SDL_Rect q = { x + AC[acc][k][0] * sc, y + (AC[acc][k][1] + top) * sc, sc, sc };
-                SDL_RenderFillRect(r, &q);
-            }
-        }
-        x += 6 * sc;
-    }
-}
-
-static void draw_text_c(SDL_Renderer *r, const char *s, int cx, int y, int sc, unsigned col) {
-    draw_text(r, s, cx - text_width(s, sc) / 2, y, sc, col);
-}
-
-/* ------------------------------------------------------------------ dibujo */
-static void fill_ellipse(SDL_Renderer *r, int cx, int cy, int rx, int ry) {
-    if (rx < 1) rx = 1;
-    if (ry < 1) ry = 1;
-    for (int dy = -ry; dy <= ry; dy++) {
-        float t = 1.0f - (float)(dy * dy) / (float)(ry * ry);
-        int dx = (int)((float)rx * sqrtf(t > 0 ? t : 0));
-        SDL_RenderDrawLine(r, cx - dx, cy + dy, cx + dx, cy + dy);
-    }
-}
-
-static void fill_circle(SDL_Renderer *r, int cx, int cy, int rad) { fill_ellipse(r, cx, cy, rad, rad); }
-
-static void fill_rect(SDL_Renderer *r, int x, int y, int w, int h, unsigned col) {
-    SDL_Rect q = { x, y, w, h };
-    setc(r, col);
-    SDL_RenderFillRect(r, &q);
-}
-
-static unsigned lighten(unsigned c, int d) {
-    int rr = ((c >> 16) & 255) + d, gg = ((c >> 8) & 255) + d, bb = (c & 255) + d;
-    if (rr > 255) rr = 255;
-    if (gg > 255) gg = 255;
-    if (bb > 255) bb = 255;
-    return ((unsigned)rr << 16) | ((unsigned)gg << 8) | (unsigned)bb;
-}
-
-static const unsigned BLOB_COL[6] = { 0xF06292, 0xFFD54F, 0x4FC3F7, 0x81C784, 0xBA68C8, 0xFF8A65 };
-static const unsigned DRUM_COL[4] = { 0xE8574B, 0xF2B632, 0x4BB8E8, 0x7BC96F };
-
-/* mood: 1 contenta, 0 normal, -1 "ups". sx/sy: aplastado. */
-static void draw_blob(SDL_Renderer *r, int cx, int cy, int rad, unsigned col, int mood, float sx, float sy) {
-    int rx = (int)(rad * sx), ry = (int)(rad * sy);
-    int er = rad / 4 > 2 ? rad / 4 : 2, pr = rad / 8 > 1 ? rad / 8 : 1;
-    setc(r, col);
-    fill_ellipse(r, cx, cy, rx, ry);
-    setc(r, 0xFFFFFF);
-    fill_circle(r, cx - rad / 3, cy - ry / 4, er);
-    fill_circle(r, cx + rad / 3, cy - ry / 4, er);
-    setc(r, 0x222222);
-    fill_circle(r, cx - rad / 3, cy - ry / 4, pr);
-    fill_circle(r, cx + rad / 3, cy - ry / 4, pr);
-    int my = cy + ry / 3, dm = mood > 0 ? rad / 6 + 1 : (mood < 0 ? -(rad / 6 + 1) : 0);
-    SDL_RenderDrawLine(r, cx - rad / 3, my, cx, my + dm);
-    SDL_RenderDrawLine(r, cx, my + dm, cx + rad / 3, my);
-}
-
-static void draw_clock(SDL_Renderer *r, int cx, int cy, int rad, int h, int m) {
-    setc(r, 0x37474F);
-    fill_circle(r, cx, cy, rad + 3);
-    setc(r, 0xFFFFFF);
-    fill_circle(r, cx, cy, rad);
-    setc(r, 0x37474F);
-    for (int k = 0; k < 12; k++) {
-        float a = k * 30.0f * PI_F / 180.0f;
-        int in = (k % 3 == 0) ? rad - 9 : rad - 5;
-        SDL_RenderDrawLine(r, cx + (int)(sinf(a) * in), cy - (int)(cosf(a) * in),
-                           cx + (int)(sinf(a) * (rad - 1)), cy - (int)(cosf(a) * (rad - 1)));
-    }
-    float am = m * 6.0f * PI_F / 180.0f;
-    float ah = ((h % 12) * 30.0f + m * 0.5f) * PI_F / 180.0f;
-    int lm = rad - 6, lh = (int)(rad * 0.55f);
-    for (int o = -1; o <= 1; o++) {
-        setc(r, 0x37474F);
-        SDL_RenderDrawLine(r, cx + o, cy, cx + o + (int)(sinf(ah) * lh), cy - (int)(cosf(ah) * lh));
-        setc(r, 0xE53935);
-        SDL_RenderDrawLine(r, cx + o, cy, cx + o + (int)(sinf(am) * lm), cy - (int)(cosf(am) * lm));
-    }
-    setc(r, 0x37474F);
-    fill_circle(r, cx, cy, 3);
-}
-
-/* botón PSP dibujado pequeño: 0 cuadrado, 1 triángulo, 2 círculo, 3 cruz */
-static void draw_symbol(SDL_Renderer *r, int i, int x, int y) {
-    setc(r, 0x222222);
-    switch (i) {
-    case 0: { SDL_Rect q = { x, y, 9, 9 }; SDL_RenderDrawRect(r, &q); break; }
-    case 1:
-        SDL_RenderDrawLine(r, x + 4, y, x, y + 9);
-        SDL_RenderDrawLine(r, x + 4, y, x + 8, y + 9);
-        SDL_RenderDrawLine(r, x, y + 9, x + 8, y + 9);
-        break;
-    case 2: fill_circle(r, x + 4, y + 4, 4); setc(r, 0xFFFFFF); fill_circle(r, x + 4, y + 4, 2); break;
-    default:
-        SDL_RenderDrawLine(r, x, y, x + 8, y + 8);
-        SDL_RenderDrawLine(r, x + 8, y, x, y + 8);
-        break;
-    }
-}
-
-/* ------------------------------------------------------------------ juego */
-enum { ST_MENU = 0, ST_PLAY = 1 };
+static const Entry SEC_NUM[] = { {K_QUIZ, MG_SUMAS}, {K_QUIZ, MG_RESTAS}, {K_QUIZ, MG_CONTAR},
+                                 {K_QUIZ, MG_SERIES}, {K_QUIZ, MG_MAYOR} };
+static const Entry SEC_LET[] = { {K_QUIZ, MG_SILABAS}, {K_QUIZ, MG_LETRA}, {K_QUIZ, MG_VOCAB} };
+static const Entry SEC_DIS[] = { {K_QUIZ, MG_COLORES}, {K_QUIZ, MG_FORMAS}, {K_QUIZ, MG_HORA}, {K_QUIZ, MG_DIAS} };
+static const Entry SEC_ART[] = { {K_RHYTHM, MG_SUMAS}, {K_PAINT, MG_SUMAS} };
 
 typedef struct {
-    int state, sel, quit;
-    MiniGame mg;
+    const char *name[2];
+    const char *soon[2];     /* texto si aún no hay juegos */
+    unsigned col;
+    const Entry *e;
+    int n;
+} Section;
+
+#define N_SECTIONS 5
+static const Section SECS[N_SECTIONS] = {
+    { {"Números", "Numbers"}, {"", ""}, 0xFB8C00, SEC_NUM, 5 },
+    { {"Letras", "Letters"}, {"", ""}, 0x42A5F5, SEC_LET, 3 },
+    { {"Descubre", "Discover"}, {"", ""}, 0x66BB6A, SEC_DIS, 4 },
+    { {"Música y arte", "Music & art"}, {"", ""}, 0xAB47BC, SEC_ART, 2 },
+    { {"Agilidad mental", "Brain games"},
+      {"Pronto: comecocos, memoria, Simon y puzzles", "Coming soon: pac-man, memory, Simon and puzzles"},
+      0xEF5350, NULL, 0 },
+};
+
+static const char *entry_name(const Entry *e, Lang l) {
+    if (e->kind == K_RHYTHM) return l == LANG_EN ? "Rhythm march" : "Marcha rítmica";
+    if (e->kind == K_PAINT) return l == LANG_EN ? "Coloring" : "Colorear";
+    return edu_game_name(e->mg, l);
+}
+
+/* ------------------------------------------------------------------ estado */
+enum { ST_HOME, ST_LIST, ST_QUIZ, ST_RHYTHM, ST_PAINT };
+
+typedef enum {
+    A_LEFT, A_RIGHT, A_UP, A_DOWN, A_OK, A_BACK, A_CASE, A_LANG, A_L, A_R,
+    A_SQR, A_TRI, A_CIR, A_CRO, A_D0, A_D1, A_D2, A_D3
+} Act;
+
+typedef struct {
+    int state, quit, smoke;
+    int home_sel, sec, list_sel;
     Lang lang;
+    int upper;                  /* 1 = MAYÚSCULAS, 0 = minúsculas (contenido de aprendizaje) */
     Rng rng;
+    float time;
+    /* preguntas */
+    MiniGame mg;
     Progress prog;
     Round r;
     unsigned wrong_mask;
     int missed, score, rounds;
-    float blob_x, blob_target, good_t, shake_t, press_t[4], time;
+    float pet_x[3], pet_target, good_t, shake_t, press_t[4];
+    /* ritmo */
+    Rhythm rh;
+    float army_x, army_target, pad_t[4], hit_t, banner_t;
+    int last_wins;
+    /* colorear */
+    Paint pt;
+    float done_t, fill_t;
 } Game;
 
-#define DRUM_X(i) (24 + (i) * 112)
-#define DRUM_Y 136
-#define DRUM_W 96
-#define DRUM_H 52
-#define MENU_Y 66
-#define MENU_H 24
+static const unsigned PET_COL[6] = { 0xF06292, 0xFFD54F, 0x4FC3F7, 0x81C784, 0xBA68C8, 0xFF8A65 };
 
-static void new_round(Game *g) {
+/* ------------------------------------------------------------------ utilidades de texto */
+static char s_tc[8][96];
+static int s_tcn;
+
+/* texto de contenido en MAYÚSCULAS o minúsculas según el ajuste */
+static const char *tc(const Game *g, const char *s) {
+    char *b = s_tc[s_tcn++ & 7];
+    edu_set_case(b, sizeof s_tc[0], s, g->upper);
+    return b;
+}
+
+static int fit_size(const char *s, int maxw, int start) {
+    static const int L[] = { 40, 28, 24, 20, 17, 14, 12, 10 };
+    for (int i = 0; i < 8; i++) {
+        if (L[i] > start) continue;
+        if (gfx_text_width(s, L[i]) <= maxw) return L[i];
+    }
+    return 10;
+}
+
+/* ------------------------------------------------------------------ partículas (confeti) */
+typedef struct { float x, y, vx, vy, life; unsigned col; int size; } Part;
+#define N_PARTS 120
+static Part s_parts[N_PARTS];
+static unsigned s_vr = 777u;
+
+static float vrand(void) { /* 0..1 solo para efectos visuales */
+    s_vr = s_vr * 1664525u + 1013904223u;
+    return (float)(s_vr >> 8) / (float)(1u << 24);
+}
+
+static void burst(float x, float y, int n, int big) {
+    for (int i = 0, k = 0; i < N_PARTS && k < n; i++) {
+        if (s_parts[i].life > 0) continue;
+        float a = vrand() * 6.2831853f, sp = (big ? 60.0f : 40.0f) + vrand() * (big ? 120.0f : 70.0f);
+        s_parts[i].x = x; s_parts[i].y = y;
+        s_parts[i].vx = cosf(a) * sp; s_parts[i].vy = sinf(a) * sp - 70.0f;
+        s_parts[i].life = 0.7f + vrand() * 0.6f;
+        s_parts[i].col = PET_COL[(int)(vrand() * 5.99f)];
+        s_parts[i].size = 2 + (int)(vrand() * 2.5f);
+        k++;
+    }
+}
+
+static void parts_update(float dt) {
+    for (int i = 0; i < N_PARTS; i++) {
+        if (s_parts[i].life <= 0) continue;
+        s_parts[i].life -= dt;
+        s_parts[i].vy += 260.0f * dt;
+        s_parts[i].x += s_parts[i].vx * dt;
+        s_parts[i].y += s_parts[i].vy * dt;
+    }
+}
+
+static void parts_draw(SDL_Renderer *r) {
+    for (int i = 0; i < N_PARTS; i++)
+        if (s_parts[i].life > 0)
+            gfx_rect(r, (int)s_parts[i].x, (int)s_parts[i].y, s_parts[i].size, s_parts[i].size, s_parts[i].col);
+}
+
+/* ------------------------------------------------------------------ escenario */
+static void draw_sky(SDL_Renderer *r) {
+    for (int y = 0; y < H; y += 4) { /* azul que aclara hacia el horizonte */
+        unsigned rr = 0x90 + (unsigned)(y * 0x50 / H), gg = 0xD0 + (unsigned)(y * 0x28 / H), bb = 0xF5 + (unsigned)(y * 0x0A / H);
+        gfx_rect(r, 0, y, W, 4, (rr << 16) | (gg << 8) | bb);
+    }
+}
+
+static void draw_clouds(SDL_Renderer *r, float t) {
+    static const float Y[3] = { 56.0f, 96.0f, 40.0f }, SP[3] = { 7.0f, 4.0f, 10.0f }, OFF[3] = { 40.0f, 230.0f, 380.0f };
+    for (int i = 0; i < 3; i++) {
+        int x = (int)fmodf(t * SP[i] + OFF[i], (float)(W + 120)) - 60, y = (int)Y[i];
+        gfx_ellipse(r, x, y, 26, 10, 0xFFFFFF);
+        gfx_ellipse(r, x - 17, y + 3, 16, 8, 0xFFFFFF);
+        gfx_ellipse(r, x + 17, y + 3, 18, 8, 0xFFFFFF);
+    }
+}
+
+static void draw_ground(SDL_Renderer *r, float t) {
+    gfx_ellipse(r, 90, 250, 190, 40, 0x8BC34A);
+    gfx_ellipse(r, 380, 258, 220, 36, 0x8BC34A);
+    gfx_rect(r, 0, 238, W, H - 238, 0x7CB342);
+    for (int i = 0; i < 12; i++) { /* florecitas que se mecen */
+        int fx = 18 + i * 40 + (i % 3) * 7, fy = 248 + (i % 2) * 10;
+        int sw = (int)(sinf(t * 2.0f + (float)i) * 2.0f);
+        gfx_line(r, fx, fy, fx + sw, fy - 8, 1, 0x388E3C);
+        gfx_circle(r, fx + sw, fy - 9, 3, PET_COL[i % 6]);
+        gfx_circle(r, fx + sw, fy - 9, 1, 0xFFFFFF);
+    }
+}
+
+static void draw_scene(SDL_Renderer *r, float t) {
+    draw_sky(r);
+    draw_clouds(r, t);
+    draw_ground(r, t);
+}
+
+/* Bolita animada que salta al compás, parpadea y respira. jump en px. */
+static void draw_pet(SDL_Renderer *r, float x, float ground, int rad, unsigned col, float t, float phase,
+                     int mood, float jump, float look) {
+    float beat = fmodf(t * 100.0f / 60.0f + phase, 1.0f);
+    float hop = fabsf(sinf(beat * PI_F)) * 4.0f;
+    float sy = 1.0f + 0.07f * sinf(beat * PI_F * 2.0f);
+    int blink = fmodf(t + phase * 5.0f, 3.4f) < 0.13f;
+    float lift = hop + jump;
+    gfx_ellipse(r, (int)x, (int)ground + 1, (int)((float)rad * (0.85f - lift / 80.0f)), 3, 0x6A9A33);
+    gfx_blob(r, (int)x, (int)(ground - (float)rad * sy - lift), rad, col, mood, 1.0f / sy, sy, look, blink);
+}
+
+static void draw_chip(SDL_Renderer *r, int x, int y, int w, int h, const char *text, unsigned fill, unsigned fg) {
+    gfx_round_rect(r, x, y, w, h, h / 2, 0x37474F);
+    gfx_round_rect(r, x + 1, y + 1, w - 2, h - 2, h / 2 - 1, fill);
+    gfx_text_c(r, text, x + w / 2, y + h / 2 - 7, 14, fg);
+}
+
+static void draw_back_button(SDL_Renderer *r) {
+    gfx_round_rect(r, 4, 4, 28, 24, 8, 0x37474F);
+    gfx_tri(r, 21, 9, 21, 23, 11, 16, 0xFFFFFF);
+}
+
+typedef struct { int sym; const char *text; } Hint;
+
+/* Pistas de botones en la parte baja, centradas */
+static void draw_hints(SDL_Renderer *r, int y, const Hint *h, int n) {
+    int total = 0, w[6];
+    for (int i = 0; i < n; i++) {
+        w[i] = gfx_text_width(h[i].text, 12) + (h[i].sym >= 0 ? 16 : 0);
+        total += w[i] + (i ? 16 : 0);
+    }
+    int x = W / 2 - total / 2;
+    for (int i = 0; i < n; i++) {
+        if (h[i].sym >= 0) {
+            gfx_circle(r, x + 6, y + 5, 7, 0x37474F);
+            gfx_symbol(r, h[i].sym, x + 6, y + 5, 3, 1, 0xFFFFFF);
+            x += 16;
+        }
+        gfx_text_ol(r, h[i].text, x, y, 12, 0xFFFFFF, 0x1B3A1B);
+        x += gfx_text_width(h[i].text, 12) + 16;
+    }
+}
+
+static void draw_top_chips(Game *g, SDL_Renderer *r, int with_lang) {
+    draw_chip(r, W - 52, 4, 48, 24, g->upper ? "ABC" : "abc", 0xFFFFFF, 0x263238);
+    if (with_lang) draw_chip(r, W - 100, 4, 44, 24, g->lang == LANG_ES ? "ES" : "EN", 0xFFF59D, 0x263238);
+}
+
+/* ------------------------------------------------------------------ preguntas */
+static const int BX[4] = { 10, 166, 322, 166 }, BY[4] = { 148, 118, 148, 178 };
+#define BW 148
+#define BH 32
+
+static void quiz_new_round(Game *g) {
     edu_make_round(&g->r, g->mg, g->prog.level, g->lang, &g->rng);
     g->wrong_mask = 0;
     g->missed = 0;
 }
 
-static void game_start(Game *g, MiniGame mg) {
+static void quiz_start(Game *g, MiniGame mg) {
     g->mg = mg;
     progress_init(&g->prog);
     g->score = g->rounds = 0;
-    g->blob_x = g->blob_target = 40;
+    for (int i = 0; i < 3; i++) g->pet_x[i] = 40.0f - 26.0f * (float)i;
+    g->pet_target = 70;
     g->good_t = g->shake_t = 0;
     memset(g->press_t, 0, sizeof g->press_t);
-    g->state = ST_PLAY;
-    new_round(g);
+    g->state = ST_QUIZ;
+    quiz_new_round(g);
 }
 
-static void game_answer(Game *g, int i) {
-    if (g->state != ST_PLAY || g->good_t > 0 || i < 0 || i > 3) return;
+static void quiz_answer(Game *g, int i) {
+    if (g->state != ST_QUIZ || g->good_t > 0 || i < 0 || i > 3) return;
     if (g->wrong_mask & (1u << i)) return;
     g->press_t[i] = 0.25f;
     if (i == g->r.correct) {
         if (!g->missed) { g->score++; progress_answer(&g->prog, 1); }
         g->rounds++;
-        g->good_t = 0.8f;
-        g->blob_target += 45;
-        if (g->blob_target > 440) { g->blob_target = 40; g->blob_x = -20; }
+        g->good_t = 0.9f;
+        g->pet_target += 45;
+        if (g->pet_target > 430) { g->pet_target = 70; for (int k = 0; k < 3; k++) g->pet_x[k] = -20.0f - 26.0f * (float)k; }
+        sfx_good();
+        burst(g->pet_x[0], 210, 22, 0);
     } else {
         if (!g->missed) progress_answer(&g->prog, 0);
         g->missed = 1;
         g->wrong_mask |= 1u << i;
         g->shake_t = 0.4f;
+        sfx_bad();
+    }
+}
+
+static void quiz_update(Game *g, float dt) {
+    for (int i = 0; i < 4; i++) if (g->press_t[i] > 0) g->press_t[i] -= dt;
+    if (g->shake_t > 0) g->shake_t -= dt;
+    if (g->good_t > 0) {
+        g->good_t -= dt;
+        if (g->good_t <= 0) quiz_new_round(g);
+    }
+    float k = dt * 5.0f > 1.0f ? 1.0f : dt * 5.0f;
+    g->pet_x[0] += (g->pet_target - g->pet_x[0]) * k;
+    for (int i = 1; i < 3; i++) g->pet_x[i] += (g->pet_x[i - 1] - 26.0f - g->pet_x[i]) * (k * 0.9f);
+}
+
+static void draw_option_button(Game *g, SDL_Renderer *r, int i) {
+    int x = BX[i], y = BY[i];
+    unsigned sc = gfx_symbol_color(i), base = gfx_lighten(sc, 85);
+    if (g->wrong_mask & (1u << i)) base = 0xCFD8DC;
+    if (g->good_t > 0 && i == g->r.correct) base = 0xA5D6A7;
+    if (g->press_t[i] > 0) { base = gfx_lighten(base, 25); y += 2; }
+    gfx_round_rect(r, x, y + 2, BW, BH, 9, 0x2F3B45);
+    gfx_round_rect(r, x, y, BW, BH, 9, 0x37474F);
+    gfx_round_rect(r, x + 2, y + 2, BW - 4, BH - 4, 7, base);
+    unsigned bc = (g->wrong_mask & (1u << i)) ? 0x90A4AE : sc;
+    gfx_circle(r, x + 18, y + BH / 2, 12, bc);
+    gfx_symbol(r, i, x + 18, y + BH / 2, 5, 2, 0xFFFFFF);
+    const char *t = tc(g, g->r.option[i]);
+    int sz = fit_size(t, BW - 46, 24);
+    gfx_text_c(r, t, x + 32 + (BW - 38) / 2, y + BH / 2 - (int)(0.35f * (float)sz), sz, 0x1B1B2F);
+}
+
+static void draw_quiz(Game *g, SDL_Renderer *r) {
+    char buf[128];
+    draw_scene(r, g->time);
+
+    draw_back_button(r);
+    gfx_text(r, edu_game_name(g->mg, g->lang), 40, 12, 14, 0x263238);
+    draw_top_chips(g, r, 0);
+    snprintf(buf, sizeof buf, g->lang == LANG_ES ? "Nivel %d   Aciertos %d" : "Level %d   Score %d", g->prog.level, g->score);
+    gfx_text(r, buf, W - 58 - gfx_text_width(buf, 12), 13, 12, 0x37474F);
+
+    /* pregunta (el hueco de las sílabas "_" se ve más grande) */
+    const char *p = tc(g, g->r.prompt);
+    char pb[128];
+    size_t o = 0;
+    for (; *p && o + 3 < sizeof pb; p++) {
+        if (*p == '_') { pb[o++] = '_'; pb[o++] = '_'; } else pb[o++] = *p;
+    }
+    pb[o] = 0;
+    int sz = fit_size(pb, W - 24, 28);
+    gfx_text_ol_c(r, pb, W / 2, 40, sz, 0x263238, 0xFFFFFF);
+
+    /* dibujo según el minijuego */
+    float t = g->time;
+    if (g->mg == MG_CONTAR) {
+        int n = g->r.visual_a, rows = n > 10 ? 2 : 1;
+        for (int row = 0; row < rows; row++) {
+            int cnt = row == 0 ? (n > 10 ? 10 : n) : n - 10;
+            int x0 = W / 2 - (cnt * 22) / 2 + 11, y = rows == 1 ? 90 : 78 + row * 22;
+            for (int i = 0; i < cnt; i++) {
+                int dy = (int)(sinf(t * 4.0f + (float)(row * 10 + i) * 0.7f) * 2.0f);
+                gfx_blob(r, x0 + i * 22, y + dy, 8, PET_COL[(row * 10 + i) % 6], 1, 1.0f, 1.0f, 0, 0);
+            }
+        }
+    } else if (g->mg == MG_HORA) {
+        gfx_clock(r, W / 2, 88, 24, g->r.visual_a, g->r.visual_b);
+    } else if (g->mg == MG_COLORES) {
+        draw_pet(r, (float)W / 2, 108, 22, edu_color_rgb(g->r.visual_a), t, 0.3f, 1, 0, 0);
+    } else if (g->mg == MG_FORMAS) {
+        gfx_shape(r, g->r.visual_a, W / 2, 88, 20, 0x1E88E5);
+    } else if ((g->mg == MG_SUMAS || g->mg == MG_RESTAS) && g->r.level == 1) {
+        int a = g->r.visual_a, b = g->r.visual_b, total = a + b, x0;
+        if (g->mg == MG_SUMAS) {
+            x0 = W / 2 - ((total + 1) * 20) / 2 + 10;
+            for (int i = 0; i < a; i++) gfx_circle(r, x0 + i * 20, 90, 7, PET_COL[0]);
+            for (int i = 0; i < b; i++) gfx_circle(r, x0 + (a + 1 + i) * 20, 90, 7, PET_COL[1]);
+        } else {
+            x0 = W / 2 - (a * 20) / 2 + 10;
+            for (int i = 0; i < a; i++) gfx_circle(r, x0 + i * 20, 90, 7, i >= a - b ? 0xB0BEC5 : PET_COL[0]);
+        }
+    }
+
+    for (int i = 0; i < 4; i++) draw_option_button(g, r, i);
+
+    /* la bolita y sus amiguitas */
+    float p1 = 1.0f - g->good_t / 0.9f;
+    int mood = g->good_t > 0 ? 1 : (g->shake_t > 0 ? -1 : 0);
+    float shake = g->shake_t > 0 ? sinf(g->time * 60.0f) * 3.0f : 0;
+    for (int i = 2; i >= 0; i--) {
+        float pk = p1 - 0.1f * (float)i, jump = (g->good_t > 0 && pk > 0 && pk < 1) ? sinf(pk * PI_F) * 36.0f : 0;
+        draw_pet(r, g->pet_x[i] + shake, 236, i == 0 ? 15 : 12, PET_COL[(g->mg + (int)i * 2) % 6], g->time,
+                 (float)i * 0.23f, mood, jump, g->pet_target - g->pet_x[0] > 4 ? 0.8f : 0);
+    }
+    parts_draw(r);
+
+    if (g->good_t > 0) {
+        static const char *OK[2][4] = { {"¡Muy bien!", "¡Genial!", "¡Fantástico!", "¡Eso es!"},
+                                        {"Great!", "Awesome!", "Fantastic!", "You got it!"} };
+        gfx_text_ol_c(r, OK[g->lang == LANG_EN][g->rounds % 4], W / 2, 216, 20, 0xFFFFFF, 0x1B5E20);
+    } else if (g->shake_t > 0) {
+        gfx_text_ol_c(r, g->lang == LANG_ES ? "¡Casi! Prueba otra" : "Almost! Try another", W / 2, 216, 20, 0xFFFFFF, 0xBF360C);
+    }
+    static const Hint HQ[2] = { {-1, "Start: menú"}, {-1, "Select: Aa"} };
+    static const Hint HQE[2] = { {-1, "Start: menu"}, {-1, "Select: Aa"} };
+    draw_hints(r, 258, g->lang == LANG_ES ? HQ : HQE, 2);
+}
+
+/* ------------------------------------------------------------------ marcha rítmica */
+static const int PADX[4] = { 196, 240, 284, 240 }, PADY[4] = { 176, 146, 176, 206 };
+#define TL_X0 80
+#define TL_X1 400
+#define TL_Y  66
+
+static void rhythm_start(Game *g) {
+    rh_init(&g->rh, &g->rng);
+    g->army_x = 40; g->army_target = 40;
+    memset(g->pad_t, 0, sizeof g->pad_t);
+    g->hit_t = g->banner_t = 0;
+    g->last_wins = 0;
+    g->state = ST_RHYTHM;
+}
+
+static void rhythm_press(Game *g, int d) {
+    if (g->state != ST_RHYTHM) return;
+    g->pad_t[d] = 0.22f;
+    sfx_drum(d);
+    int res = rh_press(&g->rh, d);
+    if (res == RH_PERFECT) burst((float)(TL_X0 + (g->rh.next - 1) * (TL_X1 - TL_X0) / (g->rh.len - 1)), TL_Y, 10, 0);
+    if (res != 0) g->hit_t = 0.25f;
+}
+
+static void rhythm_update(Game *g, float dt) {
+    rh_update(&g->rh, dt);
+    for (int i = 0; i < 4; i++) {
+        if (g->pad_t[i] > 0) g->pad_t[i] -= dt;
+        if (g->rh.ev_notes && g->rh.phase == RH_LISTEN) { /* el tamborilero toca */ }
+    }
+    for (int i = 0; i < g->rh.len; i++)
+        if (g->rh.ev_notes & (1u << i)) { g->pad_t[g->rh.seq[i]] = 0.25f; sfx_drum(g->rh.seq[i]); }
+    if (g->hit_t > 0) g->hit_t -= dt;
+    if (g->banner_t > 0) g->banner_t -= dt;
+    if (g->rh.ev_result) {
+        g->banner_t = 1.5f;
+        if (g->rh.ev_result > 0) {
+            sfx_good();
+            burst(g->army_x + 40, 200, 24, 0);
+            g->army_target = 40 + (float)(g->rh.wins % 7) * 45.0f;
+            if (g->rh.wins % 7 == 0) { /* llegaron a la bandera */
+                sfx_win();
+                burst(430, 190, 60, 1);
+                g->army_x = -60;
+            }
+        } else {
+            sfx_bad();
+        }
+    }
+    float k = dt * 3.0f > 1.0f ? 1.0f : dt * 3.0f;
+    g->army_x += (g->army_target - g->army_x) * k;
+}
+
+static void draw_pad(SDL_Renderer *r, int i, float flash) {
+    int rad = 22 + (int)(flash * 5.0f);
+    unsigned c = gfx_symbol_color(i);
+    gfx_circle(r, PADX[i], PADY[i] + 2, rad, 0x263238);
+    gfx_circle(r, PADX[i], PADY[i], rad, flash > 0 ? gfx_lighten(c, 60) : c);
+    gfx_circle(r, PADX[i], PADY[i] - 4, rad - 6, gfx_lighten(c, flash > 0 ? 80 : 35));
+    gfx_circle(r, PADX[i], PADY[i], rad - 4, flash > 0 ? gfx_lighten(c, 50) : c);
+    gfx_symbol(r, i, PADX[i], PADY[i], 8, 3, 0xFFFFFF);
+}
+
+static void draw_rhythm(Game *g, SDL_Renderer *r) {
+    const Rhythm *h = &g->rh;
+    char buf[96];
+    draw_scene(r, g->time);
+    draw_back_button(r);
+    gfx_text(r, g->lang == LANG_ES ? "Marcha rítmica" : "Rhythm march", 40, 12, 14, 0x263238);
+    draw_top_chips(g, r, 0);
+    snprintf(buf, sizeof buf, g->lang == LANG_ES ? "Nivel %d   Marchas %d" : "Level %d   Marches %d", h->level, h->wins);
+    gfx_text(r, buf, W - 58 - gfx_text_width(buf, 12), 13, 12, 0x37474F);
+
+    /* línea de tiempo con los tambores de la secuencia */
+    gfx_round_rect(r, 40, 36, 400, 62, 14, 0x263A55);
+    float sp = (float)(TL_X1 - TL_X0) / (float)(h->len - 1);
+    for (int i = 0; i < h->len; i++) {
+        int x = TL_X0 + (int)(sp * (float)i);
+        float d = h->t - rh_slot_time(i);
+        int active = (h->phase == RH_LISTEN && d > -0.05f && d < 0.22f);
+        int rad = active ? 20 : 16;
+        unsigned ring = 0x90A4AE;
+        if (h->phase == RH_PLAY || h->phase == RH_RESULT) {
+            if (h->res[i] == RH_PERFECT) ring = 0xFFD54F;
+            else if (h->res[i] == RH_GOOD) ring = 0x81C784;
+            else if (h->res[i] == RH_MISS) ring = 0xEF5350;
+            else if (h->phase == RH_PLAY && i == h->next) ring = 0xFFFFFF;
+        }
+        gfx_circle(r, x, TL_Y, rad + 3, ring);
+        gfx_circle(r, x, TL_Y, rad, active ? 0xFFFFFF : 0xECEFF1);
+        gfx_symbol(r, h->seq[i], x, TL_Y, rad / 3 + 2, 2, gfx_symbol_color(h->seq[i]));
+    }
+    if (h->phase != RH_RESULT) { /* cursor del compás: cuando cruza un círculo, toca golpear */
+        float x = (float)TL_X0 + (h->t / RH_BEAT - 1.0f) * sp;
+        if (x > (float)(TL_X0 - 30) && x < (float)(TL_X1 + 30)) {
+            gfx_rect(r, (int)x - 1, 40, 3, 52, 0xFFFFFF);
+            gfx_tri(r, (int)x - 5, 38, (int)x + 5, 38, (int)x, 46, 0xFFFFFF);
+        }
+    }
+
+    /* mensaje de fase */
+    const char *msg;
+    unsigned mc = 0xFFFFFF;
+    if (h->phase == RH_LISTEN) msg = g->lang == LANG_ES ? "Escucha..." : "Listen...";
+    else if (h->phase == RH_PLAY) msg = g->lang == LANG_ES ? "¡Ahora tú!" : "Your turn!";
+    else {
+        int perfect = 1;
+        for (int i = 0; i < h->len; i++) if (h->res[i] != RH_PERFECT) perfect = 0;
+        if (!h->success) { msg = g->lang == LANG_ES ? "¡Otra vez!" : "Try again!"; mc = 0xFFCCBC; }
+        else msg = perfect ? (g->lang == LANG_ES ? "¡Perfecto!" : "Perfect!") : (g->lang == LANG_ES ? "¡Muy bien!" : "Great!");
+    }
+    gfx_text_ol_c(r, msg, W / 2, 104, 24, mc, 0x263A55);
+
+    /* los cuatro tambores en rombo, como los botones de la consola */
+    for (int i = 0; i < 4; i++) draw_pad(r, i, g->pad_t[i] / 0.22f > 1 ? 1 : (g->pad_t[i] > 0 ? g->pad_t[i] / 0.22f : 0));
+
+    /* bandera y ejército */
+    gfx_line(r, 440, 238, 440, 196, 2, 0x5D4037);
+    gfx_tri(r, 440, 196, 440, 210, 462, 203 + (int)(sinf(g->time * 5.0f) * 2.0f), 0xE53935);
+    for (int i = 3; i >= 0; i--) {
+        float jump = 0;
+        if (g->hit_t > 0) jump = sinf(g->hit_t / 0.25f * PI_F) * 7.0f;
+        if (h->phase == RH_RESULT && h->success && g->banner_t > 0) jump += fabsf(sinf(g->time * 9.0f + (float)i)) * 14.0f;
+        int mood = h->phase == RH_RESULT ? (h->success ? 1 : -1) : 0;
+        draw_pet(r, g->army_x + (float)i * 26.0f, 236, 12, PET_COL[(i * 2 + 1) % 6], g->time, (float)i * 0.2f, mood, jump, 0.6f);
+    }
+    parts_draw(r);
+    static const Hint HR[2] = { {-1, "Start: menú"}, {-1, "Select: Aa"} };
+    draw_hints(r, 258, HR, 2);
+}
+
+/* ------------------------------------------------------------------ colorear */
+#define PX0 14
+#define PY0 30
+#define SW_X0 328
+#define SW_Y0 34
+
+static void swatch_rect(int i, int *x, int *y, int *w, int *h) {
+    *x = SW_X0 + (i % 2) * 72; *y = SW_Y0 + (i / 2) * 40; *w = 66; *h = 34;
+}
+
+static void draw_region(SDL_Renderer *r, const Region *g, unsigned fill, unsigned line, int thick) {
+    const short *v = g->v;
+    switch (g->kind) {
+    case SH_RECT:
+        gfx_rect(r, PX0 + v[0], PY0 + v[1], v[2], v[3], fill);
+        gfx_frame(r, PX0 + v[0], PY0 + v[1], v[2], v[3], line, thick);
+        break;
+    case SH_ELLIPSE:
+        gfx_ellipse(r, PX0 + v[0], PY0 + v[1], v[2] + thick, v[3] + thick, line);
+        gfx_ellipse(r, PX0 + v[0], PY0 + v[1], v[2], v[3], fill);
+        break;
+    default:
+        gfx_tri(r, PX0 + v[0], PY0 + v[1], PX0 + v[2], PY0 + v[3], PX0 + v[4], PY0 + v[5], fill);
+        gfx_line(r, PX0 + v[0], PY0 + v[1], PX0 + v[2], PY0 + v[3], thick, line);
+        gfx_line(r, PX0 + v[2], PY0 + v[3], PX0 + v[4], PY0 + v[5], thick, line);
+        gfx_line(r, PX0 + v[4], PY0 + v[5], PX0 + v[0], PY0 + v[1], thick, line);
+        break;
+    }
+}
+
+/* Solo el contorno (para marcar la región seleccionada sin tapar las demás) */
+static void outline_region(SDL_Renderer *r, const Region *g, unsigned line, int thick) {
+    const short *v = g->v;
+    switch (g->kind) {
+    case SH_RECT: gfx_frame(r, PX0 + v[0], PY0 + v[1], v[2], v[3], line, thick); break;
+    case SH_ELLIPSE: gfx_ellipse_outline(r, PX0 + v[0], PY0 + v[1], v[2], v[3], thick, line); break;
+    default:
+        gfx_line(r, PX0 + v[0], PY0 + v[1], PX0 + v[2], PY0 + v[3], thick, line);
+        gfx_line(r, PX0 + v[2], PY0 + v[3], PX0 + v[4], PY0 + v[5], thick, line);
+        gfx_line(r, PX0 + v[4], PY0 + v[5], PX0 + v[0], PY0 + v[1], thick, line);
+        break;
+    }
+}
+
+static void paint_start(Game *g) {
+    paint_init(&g->pt);
+    g->done_t = g->fill_t = 0;
+    g->state = ST_PAINT;
+}
+
+static void paint_do_fill(Game *g, int region) {
+    if (paint_fill(&g->pt, region)) {
+        const Region *rg = &paint_drawing(g->pt.drawing)->reg[region];
+        float cx = (float)(PX0 + rg->v[0]), cy = (float)(PY0 + rg->v[1]);
+        if (rg->kind == SH_RECT) { cx += (float)rg->v[2] / 2; cy += (float)rg->v[3] / 2; }
+        if (rg->kind == SH_TRI) { cx = (float)(PX0 + (rg->v[0] + rg->v[2] + rg->v[4]) / 3); cy = (float)(PY0 + (rg->v[1] + rg->v[3] + rg->v[5]) / 3); }
+        burst(cx, cy, 8, 0);
+        sfx_pop();
+        if (paint_complete(&g->pt)) { sfx_win(); burst(PX0 + 150, PY0 + 90, 70, 1); g->done_t = 2.5f; }
+    }
+}
+
+static void draw_pill(SDL_Renderer *r, int x, int y, int w, int sym, const char *text) {
+    gfx_round_rect(r, x, y, w, 26, 13, 0x37474F);
+    gfx_round_rect(r, x + 2, y + 2, w - 4, 22, 11, 0xFFFFFF);
+    gfx_circle(r, x + 15, y + 13, 9, gfx_symbol_color(sym));
+    gfx_symbol(r, sym, x + 15, y + 13, 4, 2, 0xFFFFFF);
+    gfx_text(r, text, x + 30, y + 7, 14, 0x263238);
+}
+
+static void draw_paint(Game *g, SDL_Renderer *r) {
+    draw_sky(r);
+    draw_clouds(r, g->time);
+    draw_back_button(r);
+    const Drawing *d = paint_drawing(g->pt.drawing);
+    gfx_text(r, d->name[g->lang == LANG_EN], 40, 12, 14, 0x263238);
+    draw_top_chips(g, r, 0);
+
+    gfx_rect(r, PX0 - 4, PY0 - 4, PAINT_W + 8, PAINT_H_ + 8, 0x37474F);
+    for (int i = 0; i < d->n; i++) {
+        unsigned f = g->pt.fill[g->pt.drawing][i];
+        draw_region(r, &d->reg[i], f ? edu_color_rgb((int)f - 1) : 0xFAFAFA, 0x546E7A, 1);
+    }
+    /* región seleccionada con teclado/mando: contorno que parpadea */
+    if (fmodf(g->time, 0.8f) < 0.55f) outline_region(r, &d->reg[g->pt.cursor], 0xFF4081, 3);
+
+    for (int i = 0; i < edu_color_count(); i++) {
+        int x, y, w, h;
+        swatch_rect(i, &x, &y, &w, &h);
+        int sel = i == g->pt.color;
+        gfx_round_rect(r, x - (sel ? 3 : 0), y - (sel ? 3 : 0), w + (sel ? 6 : 0), h + (sel ? 6 : 0), 9, sel ? 0xFFFFFF : 0x37474F);
+        gfx_round_rect(r, x + 1, y + 1, w - 2, h - 2, 8, edu_color_rgb(i));
+        if (sel) gfx_frame(r, x - 3, y - 3, w + 6, h + 6, 0x263238, 2);
+    }
+    gfx_text_ol_c(r, tc(g, edu_color_name(g->pt.color, g->lang)), SW_X0 + 69, 202, 24, 0xFFFFFF, 0x263238);
+
+    draw_pill(r, 14, 238, 124, 1, g->lang == LANG_ES ? "Otro dibujo" : "Next");
+    draw_pill(r, 146, 238, 104, 0, g->lang == LANG_ES ? "Borrar" : "Clear");
+    draw_pill(r, 258, 238, 100, 3, g->lang == LANG_ES ? "Pintar" : "Paint");
+    char buf[32];
+    snprintf(buf, sizeof buf, "%d / %d", paint_count_filled(&g->pt), d->n);
+    gfx_text_ol(r, buf, 380, 244, 14, 0xFFFFFF, 0x263238);
+    if (g->done_t > 0) gfx_text_ol_c(r, g->lang == LANG_ES ? "¡Qué bonito!" : "How beautiful!", PX0 + 150, PY0 + 80, 28, 0xFFFFFF, 0xAD1457);
+    parts_draw(r);
+}
+
+/* ------------------------------------------------------------------ menús */
+static const int TILE_X[5] = { 20, 170, 320, 95, 245 }, TILE_Y[5] = { 52, 52, 52, 152, 152 };
+#define TILE_W 140
+#define TILE_H 90
+
+static void draw_home(Game *g, SDL_Renderer *r) {
+    draw_scene(r, g->time);
+    gfx_text_ol_c(r, "BOLITAS EDU", W / 2 - 20, 12, 28, 0x263238, 0xFFFFFF);
+    draw_top_chips(g, r, 1);
+    for (int pass = 0; pass < 2; pass++) /* la tarjeta elegida se dibuja la última para que su borde quede encima */
+    for (int k = 0; k < N_SECTIONS; k++) {
+        int i = k, x, y, sel;
+        if (pass == 0 && i == g->home_sel) continue;
+        if (pass == 1) { if (k > 0) break; i = g->home_sel; }
+        x = TILE_X[i]; y = TILE_Y[i]; sel = i == g->home_sel;
+        float bob = sel ? fabsf(sinf(g->time * 6.0f)) * 3.0f : 0;
+        unsigned c = SECS[i].col;
+        if (SECS[i].n == 0) c = gfx_lighten(c, 70);
+        gfx_round_rect(r, x - (sel ? 4 : 0), y - (sel ? 4 : 0), TILE_W + (sel ? 8 : 0), TILE_H + (sel ? 8 : 0), 14, sel ? 0xFFFFFF : 0x37474F);
+        gfx_round_rect(r, x + 2, y + 2, TILE_W - 4, TILE_H - 4, 12, c);
+        gfx_round_rect(r, x + 6, y + 6, TILE_W - 12, 20, 9, gfx_lighten(c, 40));
+        char b[24];
+        if (SECS[i].n == 0) snprintf(b, sizeof b, "%s", g->lang == LANG_ES ? "pronto" : "soon");
+        else snprintf(b, sizeof b, g->lang == LANG_ES ? "%d juegos" : "%d games", SECS[i].n);
+        gfx_text_c(r, b, x + TILE_W / 2, y + 12, 12, 0x263238);
+        gfx_blob(r, x + TILE_W / 2, y + 44 - (int)bob, 14, gfx_lighten(c, 90), sel ? 1 : 0, 1, 1, 0, fmodf(g->time + (float)i, 3.3f) < 0.12f);
+        const char *nm = SECS[i].name[g->lang == LANG_EN];
+        int sz = fit_size(nm, TILE_W - 14, 20);
+        gfx_text_ol_c(r, nm, x + TILE_W / 2, y + 64, sz, 0xFFFFFF, gfx_lighten(c, -90));
+    }
+    static const Hint HH[3] = { {3, "Elegir"}, {-1, "L/R: ES/EN"}, {-1, "Select: Aa"} };
+    static const Hint HHE[3] = { {3, "Choose"}, {-1, "L/R: ES/EN"}, {-1, "Select: Aa"} };
+    draw_hints(r, 258, g->lang == LANG_ES ? HH : HHE, 3);
+}
+
+static void draw_list(Game *g, SDL_Renderer *r) {
+    const Section *s = &SECS[g->sec];
+    draw_scene(r, g->time);
+    draw_back_button(r);
+    draw_top_chips(g, r, 1);
+    gfx_text_ol(r, s->name[g->lang == LANG_EN], 42, 8, 24, 0xFFFFFF, gfx_lighten(s->col, -90));
+    if (s->n == 0) {
+        gfx_round_rect(r, 40, 80, 400, 110, 16, 0x37474F);
+        gfx_round_rect(r, 43, 83, 394, 104, 14, 0xFFFFFF);
+        const char *m = s->soon[g->lang == LANG_EN];
+        int sz = fit_size(m, 360, 20);
+        gfx_text_c(r, m, W / 2, 125, sz, 0x263238);
+    }
+    for (int i = 0; i < s->n; i++) {
+        int y = 46 + i * 36, sel = i == g->list_sel;
+        float bob = sel ? fabsf(sinf(g->time * 6.0f)) * 2.0f : 0;
+        gfx_round_rect(r, 50 - (sel ? 3 : 0), y - (sel ? 3 : 0), 380 + (sel ? 6 : 0), 32 + (sel ? 6 : 0), 14, sel ? 0xFFFFFF : 0x37474F);
+        gfx_round_rect(r, 52, y + 2, 376, 28, 12, sel ? gfx_lighten(s->col, 95) : gfx_lighten(s->col, 60));
+        gfx_blob(r, 76, y + 16 - (int)bob, 10, PET_COL[(g->sec + i) % 6], sel ? 1 : 0, 1, 1, 0, 0);
+        gfx_text(r, entry_name(&s->e[i], g->lang), 100, y + 9, 20, 0x1B1B2F);
+    }
+    static const Hint HL[2] = { {3, "Elegir"}, {2, "Atrás"} };
+    static const Hint HLE[2] = { {3, "Choose"}, {2, "Back"} };
+    draw_hints(r, 258, g->lang == LANG_ES ? HL : HLE, 2);
+}
+
+/* ------------------------------------------------------------------ ajustes guardados */
+static void settings_path(char *out, size_t n) {
+    char *base = SDL_GetPrefPath("notappss", "bolitas-edu");
+    out[0] = 0;
+    if (!base) return;
+    snprintf(out, n, "%ssave.dat", base);
+    SDL_free(base);
+}
+
+static void settings_load(Game *g) {
+    char path[600];
+    settings_path(path, sizeof path);
+    if (!path[0]) return;
+    FILE *f = fopen(path, "rb");
+    if (!f) return;
+    unsigned char d[4];
+    if (fread(d, 1, 4, f) == 4 && d[0] == 'B' && d[1] == 'E') {
+        g->lang = d[2] ? LANG_EN : LANG_ES;
+        g->upper = d[3] ? 1 : 0;
+    }
+    fclose(f);
+}
+
+static void settings_save(const Game *g) {
+    if (g->smoke) return;
+    char path[600];
+    settings_path(path, sizeof path);
+    if (!path[0]) return;
+    FILE *f = fopen(path, "wb");
+    if (!f) return;
+    unsigned char d[4] = { 'B', 'E', (unsigned char)(g->lang == LANG_EN), (unsigned char)g->upper };
+    fwrite(d, 1, 4, f);
+    fclose(f);
+}
+
+/* ------------------------------------------------------------------ acciones */
+static void open_entry(Game *g, const Entry *e) {
+    sfx_pop();
+    if (e->kind == K_QUIZ) quiz_start(g, e->mg);
+    else if (e->kind == K_RHYTHM) rhythm_start(g);
+    else paint_start(g);
+}
+
+static void act(Game *g, Act a) {
+    if (a == A_CASE) { g->upper = !g->upper; sfx_pop(); settings_save(g); return; }
+    switch (g->state) {
+    case ST_HOME:
+        switch (a) {
+        case A_LEFT:  g->home_sel = (g->home_sel + N_SECTIONS - 1) % N_SECTIONS; sfx_pop(); break;
+        case A_RIGHT: g->home_sel = (g->home_sel + 1) % N_SECTIONS; sfx_pop(); break;
+        case A_UP:    g->home_sel = g->home_sel >= 3 ? g->home_sel - 3 : g->home_sel; sfx_pop(); break;
+        case A_DOWN:  g->home_sel = g->home_sel < 3 ? (g->home_sel + 3 > 4 ? 4 : g->home_sel + 3) : g->home_sel; sfx_pop(); break;
+        case A_OK: case A_CRO:
+            g->sec = g->home_sel; g->list_sel = 0; g->state = ST_LIST; sfx_pop(); break;
+        case A_LANG: case A_L: case A_R:
+            g->lang = g->lang == LANG_ES ? LANG_EN : LANG_ES; sfx_pop(); settings_save(g); break;
+        case A_BACK: g->quit = 1; break;
+        default: break;
+        }
+        break;
+    case ST_LIST: {
+        const Section *s = &SECS[g->sec];
+        switch (a) {
+        case A_UP:   if (s->n) g->list_sel = (g->list_sel + s->n - 1) % s->n; sfx_pop(); break;
+        case A_DOWN: if (s->n) g->list_sel = (g->list_sel + 1) % s->n; sfx_pop(); break;
+        case A_OK: case A_CRO: if (s->n) open_entry(g, &s->e[g->list_sel]); else sfx_bad(); break;
+        case A_LANG: case A_L: case A_R:
+            g->lang = g->lang == LANG_ES ? LANG_EN : LANG_ES; sfx_pop(); settings_save(g); break;
+        case A_BACK: case A_CIR: g->state = ST_HOME; sfx_pop(); break;
+        default: break;
+        }
+        break; }
+    case ST_QUIZ: case ST_RHYTHM: {
+        int d = -1;
+        switch (a) { /* cruceta y botones del rombo apuntan a la misma opción: izq/cuadrado, arriba/triángulo... */
+        case A_LEFT: case A_SQR: case A_D0: d = 0; break;
+        case A_UP: case A_TRI: case A_D1: d = 1; break;
+        case A_RIGHT: case A_CIR: case A_D2: d = 2; break;
+        case A_DOWN: case A_CRO: case A_D3: d = 3; break;
+        case A_BACK: g->state = ST_HOME + 1; sfx_pop(); return;
+        default: break;
+        }
+        if (d >= 0) { if (g->state == ST_QUIZ) quiz_answer(g, d); else rhythm_press(g, d); }
+        break; }
+    case ST_PAINT:
+        switch (a) {
+        case A_LEFT: case A_L: g->pt.color = (g->pt.color + edu_color_count() - 1) % edu_color_count(); sfx_pop(); break;
+        case A_RIGHT: case A_R: g->pt.color = (g->pt.color + 1) % edu_color_count(); sfx_pop(); break;
+        case A_UP: paint_move_cursor(&g->pt, -1); break;
+        case A_DOWN: paint_move_cursor(&g->pt, 1); break;
+        case A_OK: case A_CRO: paint_do_fill(g, g->pt.cursor); paint_move_cursor(&g->pt, 1); break;
+        case A_TRI: paint_next_drawing(&g->pt); sfx_pop(); break;
+        case A_SQR: paint_clear(&g->pt); sfx_pop(); break;
+        case A_BACK: g->state = ST_LIST; sfx_pop(); break;
+        default: break;
+        }
+        break;
+    }
+}
+
+static int in_rect(int x, int y, int rx, int ry, int rw, int rh) { return x >= rx && x < rx + rw && y >= ry && y < ry + rh; }
+
+static void on_pointer(Game *g, int x, int y) {
+    if (in_rect(x, y, W - 52, 4, 48, 24)) { act(g, A_CASE); return; }
+    if ((g->state == ST_HOME || g->state == ST_LIST) && in_rect(x, y, W - 100, 4, 44, 24)) { act(g, A_LANG); return; }
+    if (g->state != ST_HOME && in_rect(x, y, 4, 4, 28, 24)) { act(g, g->state == ST_LIST ? A_CIR : A_BACK); return; }
+    switch (g->state) {
+    case ST_HOME:
+        for (int i = 0; i < N_SECTIONS; i++)
+            if (in_rect(x, y, TILE_X[i], TILE_Y[i], TILE_W, TILE_H)) { g->home_sel = i; act(g, A_OK); return; }
+        break;
+    case ST_LIST:
+        for (int i = 0; i < SECS[g->sec].n; i++)
+            if (in_rect(x, y, 50, 46 + i * 36, 380, 32)) { g->list_sel = i; act(g, A_OK); return; }
+        break;
+    case ST_QUIZ: case ST_RHYTHM:
+        for (int i = 0; i < 4; i++) {
+            int hit = g->state == ST_QUIZ ? in_rect(x, y, BX[i], BY[i], BW, BH)
+                                          : (x - PADX[i]) * (x - PADX[i]) + (y - PADY[i]) * (y - PADY[i]) <= 28 * 28;
+            if (hit) { act(g, (Act)(A_D0 + i)); return; }
+        }
+        break;
+    case ST_PAINT: {
+        for (int i = 0; i < edu_color_count(); i++) {
+            int sx, sy, sw, sh;
+            swatch_rect(i, &sx, &sy, &sw, &sh);
+            if (in_rect(x, y, sx, sy, sw, sh)) { g->pt.color = i; sfx_pop(); return; }
+        }
+        if (in_rect(x, y, 14, 238, 124, 26)) { act(g, A_TRI); return; }
+        if (in_rect(x, y, 146, 238, 104, 26)) { act(g, A_SQR); return; }
+        if (in_rect(x, y, 258, 238, 100, 26)) { paint_do_fill(g, g->pt.cursor); return; }
+        if (in_rect(x, y, PX0, PY0, PAINT_W, PAINT_H_)) {
+            int hit = paint_hit(paint_drawing(g->pt.drawing), x - PX0, y - PY0);
+            if (hit >= 0) { g->pt.cursor = hit; paint_do_fill(g, hit); }
+        }
+        break; }
     }
 }
 
 static void game_update(Game *g, float dt) {
     g->time += dt;
-    for (int i = 0; i < 4; i++) if (g->press_t[i] > 0) g->press_t[i] -= dt;
-    if (g->shake_t > 0) g->shake_t -= dt;
-    if (g->good_t > 0) {
-        g->good_t -= dt;
-        if (g->good_t <= 0) new_round(g);
-    }
-    float k = dt * 5.0f > 1.0f ? 1.0f : dt * 5.0f;
-    g->blob_x += (g->blob_target - g->blob_x) * k;
-}
-
-static void act_drum(Game *g, int i) { if (g->state == ST_PLAY) game_answer(g, i); }
-static void act_nav(Game *g, int d) { if (g->state == ST_MENU) g->sel = (g->sel + d + MG_COUNT) % MG_COUNT; }
-static void act_ok(Game *g) { if (g->state == ST_MENU) game_start(g, (MiniGame)g->sel); }
-static void act_back(Game *g) { if (g->state == ST_PLAY) g->state = ST_MENU; else g->quit = 1; }
-static void act_lang(Game *g) {
-    g->lang = g->lang == LANG_ES ? LANG_EN : LANG_ES;
-    if (g->state == ST_PLAY) new_round(g);
-}
-
-/* ------------------------------------------------------------------ pintado */
-static void draw_background(SDL_Renderer *r) {
-    for (int y = 0; y < H; y += 4) { /* cielo: azul que aclara hacia el horizonte */
-        unsigned rr = 0x90 + (unsigned)(y * 0x50 / H), gg = 0xD0 + (unsigned)(y * 0x28 / H), bb = 0xF5 + (unsigned)(y * 0x0A / H);
-        fill_rect(r, 0, y, W, 4, (rr << 16) | (gg << 8) | bb);
-    }
-    setc(r, 0x8BC34A);
-    fill_ellipse(r, 90, 250, 190, 40);
-    fill_ellipse(r, 380, 258, 220, 36);
-    fill_rect(r, 0, 238, W, H - 238, 0x7CB342);
-}
-
-static void draw_row_blobs(SDL_Renderer *r, const Round *rd) {
-    int a = rd->visual_a, b = rd->visual_b, total = a + b, x0;
-    if (rd->game == MG_SUMAS) {
-        x0 = W / 2 - ((total + 1) * 20) / 2 + 10;
-        for (int i = 0; i < a; i++) { setc(r, BLOB_COL[0]); fill_circle(r, x0 + i * 20, 97, 7); }
-        for (int i = 0; i < b; i++) { setc(r, BLOB_COL[1]); fill_circle(r, x0 + (a + 1 + i) * 20, 97, 7); }
-    } else { /* restas: las b últimas "se van" (grises) */
-        x0 = W / 2 - (a * 20) / 2 + 10;
-        for (int i = 0; i < a; i++) {
-            setc(r, i >= a - b ? 0xB0BEC5 : BLOB_COL[0]);
-            fill_circle(r, x0 + i * 20, 97, 7);
-        }
-    }
+    parts_update(dt);
+    if (g->state == ST_QUIZ) quiz_update(g, dt);
+    else if (g->state == ST_RHYTHM) rhythm_update(g, dt);
+    else if (g->state == ST_PAINT && g->done_t > 0) g->done_t -= dt;
 }
 
 static void game_draw(Game *g, SDL_Renderer *r) {
-    char buf[64];
-    SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
-    SDL_RenderClear(r);
-    draw_background(r);
-
-    if (g->state == ST_MENU) {
-        draw_text_c(r, "BOLITAS EDU", W / 2, 14, 5, 0x37474F);
-        for (int i = 0; i < MG_COUNT; i++) {
-            int y = MENU_Y + i * MENU_H;
-            const char *nm = edu_game_name((MiniGame)i, g->lang);
-            if (i == g->sel) {
-                fill_rect(r, 90, y - 2, 300, MENU_H - 2, 0xFFFFFF);
-                setc(r, BLOB_COL[i % 6]);
-                fill_circle(r, 104, y + 9, 7);
-            }
-            draw_text(r, nm, 124, y + 1, 2, i == g->sel ? 0x263238 : 0x455A64);
-        }
-        draw_text_c(r, g->lang == LANG_ES ? "ES" : "EN", W - 28, 248, 3, 0x1B5E20);
-        draw_text(r, g->lang == LANG_ES ? "Arriba/Abajo + OK   L: idioma" : "Up/Down + OK   L: language",
-                  8, 260, 1, 0x1B5E20);
-        return;
+    gfx_begin(r);
+    switch (g->state) {
+    case ST_HOME: draw_home(g, r); break;
+    case ST_LIST: draw_list(g, r); break;
+    case ST_QUIZ: draw_quiz(g, r); break;
+    case ST_RHYTHM: draw_rhythm(g, r); break;
+    default: draw_paint(g, r); break;
     }
-
-    /* HUD */
-    draw_text(r, edu_game_name(g->mg, g->lang), 8, 6, 2, 0x37474F);
-    snprintf(buf, sizeof buf, g->lang == LANG_ES ? "Nivel %d  Aciertos %d" : "Level %d  Score %d",
-             g->prog.level, g->score);
-    draw_text(r, buf, W - 8 - text_width(buf, 1), 6, 1, 0x37474F);
-
-    /* pregunta */
-    int sc = 4;
-    while (sc > 1 && text_width(g->r.prompt, sc) > W - 40) sc--;
-    draw_text_c(r, g->r.prompt, W / 2, 30, sc, 0x263238);
-
-    /* dibujo según el minijuego */
-    if (g->mg == MG_CONTAR) {
-        int n = g->r.visual_a, rows = n > 10 ? 2 : 1;
-        for (int row = 0; row < rows; row++) {
-            int cnt = row == 0 ? (n > 10 ? 10 : n) : n - 10;
-            int x0 = W / 2 - (cnt * 22) / 2 + 11, y = rows == 1 ? 97 : 80 + row * 24;
-            for (int i = 0; i < cnt; i++) { setc(r, BLOB_COL[(row * 10 + i) % 6]); fill_circle(r, x0 + i * 22, y, 8); }
-        }
-    } else if (g->mg == MG_HORA) {
-        draw_clock(r, W / 2, 98, 30, g->r.visual_a, g->r.visual_b);
-    } else if ((g->mg == MG_SUMAS || g->mg == MG_RESTAS) && g->r.level == 1) {
-        draw_row_blobs(r, &g->r);
-    }
-
-    /* tambores */
-    for (int i = 0; i < 4; i++) {
-        int x = DRUM_X(i), y = DRUM_Y;
-        unsigned c = DRUM_COL[i];
-        if (g->wrong_mask & (1u << i)) c = 0x9E9E9E;
-        if (g->good_t > 0 && i == g->r.correct) c = 0x66BB6A;
-        if (g->press_t[i] > 0) { c = lighten(c, 50); y += 3; }
-        fill_rect(r, x - 2, y - 2, DRUM_W + 4, DRUM_H + 4, 0x37474F);
-        fill_rect(r, x, y, DRUM_W, DRUM_H, c);
-        fill_rect(r, x, y, DRUM_W, 6, lighten(c, 40));
-        draw_symbol(r, i, x + 6, y + 9);
-        const char *t = g->r.option[i];
-        int s2 = 3;
-        while (s2 > 1 && text_width(t, s2) > DRUM_W - 12) s2--;
-        draw_text_c(r, t, x + DRUM_W / 2, y + (DRUM_H - 8 * s2) / 2 + 3, s2, 0x1B1B2F);
-    }
-
-    /* bolita que rueda (salta al ritmo, 100 pulsos por minuto) */
-    float beat = fmodf(g->time * 100.0f / 60.0f, 1.0f);
-    float bounce = fabsf(sinf(beat * PI_F)) * 5.0f;
-    float sy = 1.0f + 0.06f * sinf(beat * PI_F);
-    if (g->good_t > 0) bounce = sinf((1.0f - g->good_t / 0.8f) * PI_F) * 40.0f;
-    float shake = g->shake_t > 0 ? sinf(g->time * 60.0f) * 3.0f : 0;
-    int mood = g->good_t > 0 ? 1 : (g->shake_t > 0 ? -1 : 0);
-    draw_blob(r, (int)(g->blob_x + shake), 222 - (int)bounce, 14, BLOB_COL[g->mg % 6], mood, 1.0f / sy, sy);
-
-    /* mensajes (sin castigo: solo ánimo) */
-    if (g->good_t > 0)
-        draw_text_c(r, g->lang == LANG_ES ? "¡Muy bien!" : "Great!", W / 2, 196, 2, 0x1B5E20);
-    else if (g->shake_t > 0)
-        draw_text_c(r, g->lang == LANG_ES ? "¡Casi! Prueba otra" : "Almost! Try another", W / 2, 196, 2, 0xBF360C);
-
-    draw_text(r, g->lang == LANG_ES ? "Esc/Start: menu" : "Esc/Start: menu", 8, 260, 1, 0x1B5E20);
 }
 
 /* ------------------------------------------------------------------ entrada */
 static void on_key(Game *g, SDL_Keycode k) {
     switch (k) {
-    case SDLK_1: case SDLK_z: act_drum(g, 0); break;
-    case SDLK_2: case SDLK_x: act_drum(g, 1); break;
-    case SDLK_3: case SDLK_c: act_drum(g, 2); break;
-    case SDLK_4: case SDLK_v: act_drum(g, 3); break;
-    case SDLK_UP: act_nav(g, -1); break;
-    case SDLK_DOWN: act_nav(g, 1); break;
-    case SDLK_RETURN: case SDLK_SPACE: act_ok(g); break;
-    case SDLK_ESCAPE: case SDLK_AC_BACK: act_back(g); break;
-    case SDLK_l: act_lang(g); break;
+    case SDLK_LEFT: act(g, A_LEFT); break;
+    case SDLK_RIGHT: act(g, A_RIGHT); break;
+    case SDLK_UP: act(g, A_UP); break;
+    case SDLK_DOWN: act(g, A_DOWN); break;
+    case SDLK_1: case SDLK_z: act(g, A_D0); break;
+    case SDLK_2: case SDLK_x: act(g, A_D1); break;
+    case SDLK_3: case SDLK_c: act(g, A_D2); break;
+    case SDLK_4: case SDLK_v: act(g, A_D3); break;
+    case SDLK_RETURN: case SDLK_SPACE: act(g, A_OK); break;
+    case SDLK_ESCAPE: case SDLK_AC_BACK: act(g, A_BACK); break;
+    case SDLK_TAB: act(g, A_CASE); break;
+    case SDLK_l: act(g, A_LANG); break;
+    case SDLK_n: act(g, A_TRI); break;
+    case SDLK_BACKSPACE: case SDLK_DELETE: act(g, A_SQR); break;
     default: break;
     }
 }
 
 static void on_joy(Game *g, int b) {
-#ifdef __PSP__
+#ifdef PSP_LIKE_PAD
     /* 0 triangulo, 1 circulo, 2 cruz, 3 cuadrado, 4 L, 5 R, 6 abajo, 7 izq, 8 arriba, 9 der, 10 select, 11 start */
     switch (b) {
-    case 3: act_drum(g, 0); act_ok(g); break;
-    case 0: act_drum(g, 1); act_ok(g); break;
-    case 1: act_drum(g, 2); act_ok(g); break;
-    case 2: act_drum(g, 3); act_ok(g); break;
-    case 6: act_nav(g, 1); break;
-    case 8: act_nav(g, -1); break;
-    case 4: case 5: case 10: act_lang(g); break;
-    case 11: act_back(g); break;
+    case 0: act(g, A_TRI); break;
+    case 1: act(g, A_CIR); break;
+    case 2: act(g, A_CRO); break;
+    case 3: act(g, A_SQR); break;
+    case 4: act(g, A_L); break;
+    case 5: act(g, A_R); break;
+    case 6: act(g, A_DOWN); break;
+    case 7: act(g, A_LEFT); break;
+    case 8: act(g, A_UP); break;
+    case 9: act(g, A_RIGHT); break;
+    case 10: act(g, A_CASE); break;
+    case 11: act(g, A_BACK); break;
     default: break;
     }
 #else
-    if (b >= 0 && b <= 3) { act_drum(g, b); act_ok(g); }
-    else if (b == 6 || b == 7) act_back(g);
+    if (b >= 0 && b <= 3) act(g, (Act)(A_D0 + b));
+    else if (b == 6 || b == 7) act(g, A_BACK);
 #endif
-}
-
-static void on_click(Game *g, int x, int y) {
-    if (g->state == ST_MENU) {
-        if (x >= W - 70 && y >= 244) { act_lang(g); return; }
-        for (int i = 0; i < MG_COUNT; i++) {
-            int yy = MENU_Y + i * MENU_H;
-            if (x >= 90 && x < 390 && y >= yy - 2 && y < yy + MENU_H - 2) { g->sel = i; act_ok(g); return; }
-        }
-    } else {
-        for (int i = 0; i < 4; i++)
-            if (x >= DRUM_X(i) && x < DRUM_X(i) + DRUM_W && y >= DRUM_Y && y < DRUM_Y + DRUM_H) { act_drum(g, i); return; }
-        if (y >= 250 && x < 140) act_back(g);
-    }
 }
 
 /* ------------------------------------------------------------------ prueba automática */
 static void save_shot(SDL_Renderer *ren, const char *name) {
-    /* SDL lee la salida real (ventana), no el tamaño lógico: hay que pedirlo */
     int ow = W, oh = H;
     SDL_GetRendererOutputSize(ren, &ow, &oh);
     SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, ow, oh, 32, SDL_PIXELFORMAT_ARGB8888);
@@ -480,39 +899,112 @@ static void save_shot(SDL_Renderer *ren, const char *name) {
     SDL_FreeSurface(s);
 }
 
-static int run_smoke(SDL_Renderer *ren, Game *g) {
+#define SMOKE_FAIL(...) do { printf("FALLO: " __VA_ARGS__); printf("\n"); return 1; } while (0)
+
+static void step(Game *g, int frames) { for (int k = 0; k < frames; k++) game_update(g, 0.016f); }
+
+static int smoke_quiz(Game *g, SDL_Renderer *ren, MiniGame mg) {
     char name[64];
-    game_draw(g, ren);
-    save_shot(ren, "shot_menu.bmp");
-    for (int mg = 0; mg < MG_COUNT; mg++) {
-        game_start(g, (MiniGame)mg);
-        for (int k = 0; k < 30; k++) game_update(g, 0.016f);
-        for (int round = 0; round < 8; round++) {
-            if (round == 1) { /* un fallo primero: debe quedar marcado y no avanzar */
-                int w = (g->r.correct + 1) % 4;
-                game_answer(g, w);
-                if (!g->missed || !(g->wrong_mask & (1u << w)) || g->good_t > 0) { printf("FALLO: fallo no registrado\n"); return 1; }
-                game_draw(g, ren);
-                snprintf(name, sizeof name, "shot_%d_oops.bmp", mg);
-                save_shot(ren, name);
-            }
+    quiz_start(g, mg);
+    step(g, 30);
+    for (int round = 0; round < 8; round++) {
+        if (round == 1) { /* un fallo primero: debe marcarse y no avanzar */
+            int w = (g->r.correct + 1) % 4;
+            quiz_answer(g, w);
+            if (!g->missed || !(g->wrong_mask & (1u << w)) || g->good_t > 0) SMOKE_FAIL("fallo no registrado (%d)", (int)mg);
             game_draw(g, ren);
-            if (round == 0) { snprintf(name, sizeof name, "shot_%d.bmp", mg); save_shot(ren, name); }
-            game_answer(g, g->r.correct);
-            if (g->good_t <= 0) { printf("FALLO: acierto no registrado\n"); return 1; }
-            for (int k = 0; k < 60; k++) game_update(g, 0.016f);
-            if (g->good_t > 0) { printf("FALLO: la ronda no avanza\n"); return 1; }
+            snprintf(name, sizeof name, "shot_q%d_oops.bmp", (int)mg);
+            save_shot(ren, name);
         }
-        if (g->rounds != 8) { printf("FALLO: rondas=%d\n", g->rounds); return 1; }
-        printf("ok  %s  nivel=%d aciertos=%d\n", edu_game_name((MiniGame)mg, LANG_ES), g->prog.level, g->score);
+        if (round == 2) g->upper = 0; /* probar también minúsculas */
+        game_draw(g, ren);
+        if (round == 0 || round == 2) {
+            snprintf(name, sizeof name, round == 0 ? "shot_q%d.bmp" : "shot_q%d_min.bmp", (int)mg);
+            save_shot(ren, name);
+        }
+        quiz_answer(g, g->r.correct);
+        if (g->good_t <= 0) SMOKE_FAIL("acierto no registrado (%d)", (int)mg);
+        step(g, 70);
+        if (g->good_t > 0) SMOKE_FAIL("la ronda no avanza (%d)", (int)mg);
     }
+    g->upper = 1;
+    if (g->rounds != 8) SMOKE_FAIL("rondas=%d", g->rounds);
+    printf("ok  %-20s nivel=%d aciertos=%d\n", edu_game_name(mg, LANG_ES), g->prog.level, g->score);
+    return 0;
+}
+
+static int smoke_rhythm(Game *g, SDL_Renderer *ren) {
+    rhythm_start(g);
+    int shots = 0, played = 0;
+    for (int f = 0; f < 4000 && g->rh.wins < 3; f++) {
+        game_update(g, 0.016f);
+        Rhythm *h = &g->rh;
+        if (h->phase == RH_PLAY && h->next < h->len && h->t >= rh_slot_time(h->next)) {
+            rhythm_press(g, h->seq[h->next]);
+            played++;
+        }
+        if (!(shots & 1) && h->phase == RH_LISTEN && h->t > 1.5f) { game_draw(g, ren); save_shot(ren, "shot_rhythm_listen.bmp"); shots |= 1; }
+        if (!(shots & 2) && h->phase == RH_PLAY && h->next >= 1) { game_draw(g, ren); save_shot(ren, "shot_rhythm_play.bmp"); shots |= 2; }
+        if (!(shots & 4) && h->phase == RH_RESULT) { game_draw(g, ren); save_shot(ren, "shot_rhythm_result.bmp"); shots |= 4; }
+    }
+    if (g->rh.wins < 3) SMOKE_FAIL("el ritmo no avanza (wins=%d, jugadas=%d)", g->rh.wins, played);
+    printf("ok  ritmo                wins=%d nivel=%d\n", g->rh.wins, g->rh.level);
+    return 0;
+}
+
+static int smoke_paint(Game *g, SDL_Renderer *ren) {
+    char name[64];
+    paint_start(g);
+    for (int d = 0; d < PAINT_DRAWINGS; d++) {
+        const Drawing *dr = paint_drawing(g->pt.drawing);
+        for (int i = 0; i < dr->n; i++) {
+            g->pt.color = (i + d) % edu_color_count();
+            paint_do_fill(g, i);
+            if (i == dr->n / 2) { game_draw(g, ren); snprintf(name, sizeof name, "shot_paint%d_half.bmp", d); save_shot(ren, name); }
+        }
+        step(g, 20);
+        if (!paint_complete(&g->pt)) SMOKE_FAIL("dibujo %d incompleto", d);
+        game_draw(g, ren);
+        snprintf(name, sizeof name, "shot_paint%d_done.bmp", d);
+        save_shot(ren, name);
+        paint_next_drawing(&g->pt);
+    }
+    printf("ok  colorear\n");
+    return 0;
+}
+
+static int run_smoke(SDL_Renderer *ren, Game *g) {
+    g->state = ST_HOME;
+    game_draw(g, ren);
+    save_shot(ren, "shot_home.bmp");
+    g->sec = 0; g->state = ST_LIST;
+    game_draw(g, ren);
+    save_shot(ren, "shot_list.bmp");
+    g->sec = 4; g->state = ST_LIST;
+    game_draw(g, ren);
+    save_shot(ren, "shot_list_soon.bmp");
+    /* clics sobre el menú */
+    g->state = ST_HOME;
+    on_pointer(g, TILE_X[1] + 10, TILE_Y[1] + 10);
+    if (g->state != ST_LIST || g->sec != 1) SMOKE_FAIL("clic en seccion");
+    on_pointer(g, 100, 46 + 36 + 5);
+    if (g->state != ST_QUIZ || g->mg != MG_LETRA) SMOKE_FAIL("clic en juego (%d)", (int)g->mg);
+    on_pointer(g, 10, 10);
+    if (g->state != ST_LIST) SMOKE_FAIL("boton atras");
+
+    for (int mg = 0; mg < MG_COUNT; mg++)
+        if (smoke_quiz(g, ren, (MiniGame)mg)) return 1;
+    if (smoke_rhythm(g, ren)) return 1;
+    if (smoke_paint(g, ren)) return 1;
+
     g->lang = LANG_EN;
-    game_start(g, MG_VOCAB);
+    quiz_start(g, MG_VOCAB);
     game_draw(g, ren);
     save_shot(ren, "shot_en.bmp");
     return 0;
 }
 
+/* ------------------------------------------------------------------ main */
 int main(int argc, char **argv) {
     int smoke = argc > 1 && strcmp(argv[1], "--smoke") == 0;
     if (smoke) setvbuf(stdout, NULL, _IONBF, 0); /* que el log de CI no se pierda si algo falla */
@@ -526,6 +1018,8 @@ int main(int argc, char **argv) {
     wflags |= SDL_WINDOW_FULLSCREEN;
 #elif defined(__PSP__)
     ww = W; wh = H;
+#elif defined(__vita__)
+    ww = 960; wh = 544;
 #else
     wflags |= SDL_WINDOW_RESIZABLE;
 #endif
@@ -535,18 +1029,22 @@ int main(int argc, char **argv) {
     if (!smoke) ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     if (!ren) ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
     if (!ren) { fprintf(stderr, "SDL_CreateRenderer: %s\n", SDL_GetError()); return 1; }
-    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
-    SDL_RenderSetLogicalSize(ren, W, H);
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1"); /* las letras escaladas salen suaves, no con dientes */
     if (SDL_NumJoysticks() > 0) SDL_JoystickOpen(0);
+    audio_init();
 
-    Game g;
+    static Game g; /* estático: cero al empezar */
     memset(&g, 0, sizeof g);
+    g.smoke = smoke;
     g.lang = LANG_ES;
+    g.upper = 1; /* mayúsculas por defecto: letra de palo para empezar a leer */
     rng_seed(&g.rng, smoke ? 1234u : (SDL_GetTicks() | 1u));
     progress_init(&g.prog);
+    if (!smoke) settings_load(&g);
 
     if (smoke) {
         int rc = run_smoke(ren, &g);
+        audio_close();
         SDL_DestroyRenderer(ren);
         SDL_DestroyWindow(win);
         SDL_Quit();
@@ -562,12 +1060,16 @@ int main(int argc, char **argv) {
             case SDL_QUIT: g.quit = 1; break;
             case SDL_KEYDOWN: if (!e.key.repeat) on_key(&g, e.key.keysym.sym); break;
             case SDL_JOYBUTTONDOWN: on_joy(&g, e.jbutton.button); break;
-            case SDL_MOUSEBUTTONDOWN: on_click(&g, e.button.x, e.button.y); break;
+            case SDL_MOUSEBUTTONDOWN: {
+                int lx, ly;
+                gfx_to_logical(e.button.x, e.button.y, &lx, &ly);
+                on_pointer(&g, lx, ly);
+                break; }
             default: break;
             }
         }
         Uint32 now = SDL_GetTicks();
-        float dt = (now - last) / 1000.0f;
+        float dt = (float)(now - last) / 1000.0f;
         last = now;
         if (dt > 0.05f) dt = 0.05f;
         game_update(&g, dt);
@@ -575,6 +1077,8 @@ int main(int argc, char **argv) {
         SDL_RenderPresent(ren);
         if (dt < 0.012f) SDL_Delay(8);
     }
+    settings_save(&g);
+    audio_close();
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);
     SDL_Quit();

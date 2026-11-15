@@ -1,8 +1,9 @@
 # PSP original (pspdev). Compilar: make -C platform/psp
 TARGET = bolitas_edu
-OBJS = ../pc/main.o ../../core/edu.o
+OBJS = ../pc/main.o ../pc/gfx.o ../pc/audio.o ../pc/font_data.o \
+       ../../core/edu.o ../../core/rhythm.o ../../core/paint.o
 
-CFLAGS = -O2 -G0 -Wall -std=gnu99 -I../../core
+CFLAGS = -O2 -G0 -Wall -std=gnu99 -I../../core -I../pc
 CXXFLAGS = $(CFLAGS)
 ASFLAGS = $(CFLAGS)
 

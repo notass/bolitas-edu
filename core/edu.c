@@ -181,11 +181,131 @@ static void make_clock(Round *r, int level, Lang lang, Rng *g) {
     shuffle_correct(r, g);
 }
 
+/* ---------- tablas: colores, figuras, días, meses ---------- */
+static const struct { unsigned rgb; const char *n[2]; } COLORS[] = {
+    {0xE53935, {"rojo", "red"}},        {0xFB8C00, {"naranja", "orange"}},
+    {0xFDD835, {"amarillo", "yellow"}}, {0x43A047, {"verde", "green"}},
+    {0x1E88E5, {"azul", "blue"}},       {0x8E24AA, {"morado", "purple"}},
+    {0xEC407A, {"rosa", "pink"}},       {0x795548, {"marrón", "brown"}},
+};
+#define COLOR_N COUNT_OF(COLORS)
+
+static const char *SHAPES[][2] = {
+    {"círculo", "circle"},     {"cuadrado", "square"},  {"triángulo", "triangle"},
+    {"rectángulo", "rectangle"}, {"rombo", "diamond"},
+};
+#define SHAPE_N COUNT_OF(SHAPES)
+
+static const char *const DAYS[2][7] = {
+    {"lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"},
+    {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"},
+};
+static const char *const MONTHS[2][12] = {
+    {"enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
+     "septiembre", "octubre", "noviembre", "diciembre"},
+    {"January", "February", "March", "April", "May", "June", "July", "August",
+     "September", "October", "November", "December"},
+};
+
+int edu_color_count(void) { return (int)COLOR_N; }
+unsigned edu_color_rgb(int i) { return COLORS[clampi(i, 0, (int)COLOR_N - 1)].rgb; }
+const char *edu_color_name(int i, Lang lang) { return COLORS[clampi(i, 0, (int)COLOR_N - 1)].n[lang == LANG_EN]; }
+int edu_shape_count(void) { return (int)SHAPE_N; }
+const char *edu_shape_name(int i, Lang lang) { return SHAPES[clampi(i, 0, (int)SHAPE_N - 1)][lang == LANG_EN]; }
+
+/* option[0] = names[c]; el resto, otros nombres distintos; luego se baraja. */
+static void set_name_options(Round *r, const char *const *names, int n, int c, Rng *g) {
+    snprintf(r->option[0], sizeof r->option[0], "%s", names[c]);
+    int m = 1, guard = 0;
+    while (m < EDU_OPTIONS && guard++ < 500) {
+        const char *s = names[rng_range(g, 0, n - 1)];
+        if (!has_option(r, m, s)) snprintf(r->option[m++], sizeof r->option[0], "%s", s);
+    }
+    shuffle_correct(r, g);
+}
+
+static void make_bigger(Round *r, int level, Lang lang, Rng *g) {
+    int top = level == 1 ? 20 : (level == 2 ? 100 : 1000);
+    int v[EDU_OPTIONS], n = 0, guard = 0;
+    while (n < EDU_OPTIONS && guard++ < 500) {
+        int x = rng_range(g, 0, top), dup = 0;
+        for (int i = 0; i < n; i++) if (v[i] == x) dup = 1;
+        if (!dup) v[n++] = x;
+    }
+    int big = rng_range(g, 0, 1), best = 0;
+    for (int i = 1; i < EDU_OPTIONS; i++)
+        if (big ? v[i] > v[best] : v[i] < v[best]) best = i;
+    for (int i = 0; i < EDU_OPTIONS; i++) snprintf(r->option[i], sizeof r->option[i], "%d", v[i]);
+    r->correct = best;
+    r->visual_a = big;
+    if (lang == LANG_ES) snprintf(r->prompt, sizeof r->prompt, big ? "¿Cuál es el número mayor?" : "¿Cuál es el número menor?");
+    else snprintf(r->prompt, sizeof r->prompt, big ? "Which number is bigger?" : "Which number is smaller?");
+}
+
+static void make_letter(Round *r, int level, Lang lang, Rng *g) {
+    int k = rng_range(g, 0, (int)VOCAB_N - 1);
+    const char *w = VOCAB[k][lang == LANG_EN ? 1 : 0];
+    int ends = level == 1 ? 0 : (level == 2 ? rng_range(g, 0, 1) : 1);
+    char c = (char)((ends ? w[strlen(w) - 1] : w[0]) - 'a' + 'A');
+    if (lang == LANG_ES)
+        snprintf(r->prompt, sizeof r->prompt, "¿Con qué letra %s \"%s\"?", ends ? "termina" : "empieza", w);
+    else
+        snprintf(r->prompt, sizeof r->prompt, "What letter does \"%s\" %s with?", w, ends ? "end" : "start");
+    snprintf(r->option[0], sizeof r->option[0], "%c", c);
+    int n = 1, guard = 0;
+    while (n < EDU_OPTIONS && guard++ < 500) {
+        char b[2] = { (char)('A' + rng_range(g, 0, 25)), 0 };
+        if (!has_option(r, n, b)) snprintf(r->option[n++], sizeof r->option[0], "%s", b);
+    }
+    shuffle_correct(r, g);
+    r->visual_a = ends; r->visual_b = k;
+}
+
+static void make_color(Round *r, int level, Lang lang, Rng *g) {
+    int pool = level == 1 ? 4 : (level == 2 ? 6 : (int)COLOR_N);
+    int k = rng_range(g, 0, pool - 1);
+    const char *nm[COLOR_N];
+    for (int i = 0; i < (int)COLOR_N; i++) nm[i] = edu_color_name(i, lang);
+    snprintf(r->prompt, sizeof r->prompt, lang == LANG_ES ? "¿De qué color es la bolita?" : "What color is the blob?");
+    r->visual_a = k;
+    set_name_options(r, nm, (int)COLOR_N, k, g);
+}
+
+static void make_shape(Round *r, int level, Lang lang, Rng *g) {
+    int k = rng_range(g, 0, level + 1); /* nivel 1: 3 figuras, 2: 4, 3: 5 */
+    const char *nm[SHAPE_N];
+    for (int i = 0; i < (int)SHAPE_N; i++) nm[i] = edu_shape_name(i, lang);
+    snprintf(r->prompt, sizeof r->prompt, lang == LANG_ES ? "¿Qué figura es?" : "What shape is it?");
+    r->visual_a = k;
+    set_name_options(r, nm, (int)SHAPE_N, k, g);
+}
+
+static void make_days(Round *r, int level, Lang lang, Rng *g) {
+    int months = level == 3, n = months ? 12 : 7;
+    const char *const *list = months ? MONTHS[lang == LANG_EN] : DAYS[lang == LANG_EN];
+    int base = rng_range(g, 0, n - 1);
+    int after = level == 1 ? 1 : rng_range(g, 0, 1);
+    int c = (base + (after ? 1 : n - 1)) % n;
+    if (lang == LANG_ES)
+        snprintf(r->prompt, sizeof r->prompt, months ? "¿Qué mes va %s de %s?" : "¿Qué día va %s del %s?",
+                 after ? "después" : "antes", list[base]);
+    else
+        snprintf(r->prompt, sizeof r->prompt, months ? "Which month comes %s %s?" : "Which day comes %s %s?",
+                 after ? "after" : "before", list[base]);
+    r->visual_a = base; r->visual_b = (months << 1) | after;
+    set_name_options(r, list, n, c, g);
+}
+
 void edu_make_round(Round *r, MiniGame game, int level, Lang lang, Rng *g) {
     memset(r, 0, sizeof *r);
     level = clampi(level, 1, EDU_LEVELS);
     r->game = game; r->level = level;
     switch (game) {
+        case MG_MAYOR:   make_bigger(r, level, lang, g); break;
+        case MG_LETRA:   make_letter(r, level, lang, g); break;
+        case MG_COLORES: make_color(r, level, lang, g); break;
+        case MG_FORMAS:  make_shape(r, level, lang, g); break;
+        case MG_DIAS:    make_days(r, level, lang, g); break;
         case MG_SUMAS:   make_sum(r, level, g, 0); break;
         case MG_RESTAS:  make_sum(r, level, g, 1); break;
         case MG_CONTAR:  make_count(r, level, lang, g); break;
@@ -206,8 +326,35 @@ const char *edu_game_name(MiniGame game, Lang lang) {
         {"Tambor de sílabas", "Syllable drums"},
         {"Palabras del mundo", "World words"},
         {"Reloj cucú", "Cuckoo clock"},
+        {"Mayor o menor", "Bigger or smaller"},
+        {"Letras mágicas", "Magic letters"},
+        {"Colores", "Colors"},
+        {"Figuras", "Shapes"},
+        {"Días y meses", "Days & months"},
     };
     return (game >= 0 && game < MG_COUNT) ? N[game][lang == LANG_EN] : "";
+}
+
+/* ---------- mayúsculas / minúsculas ---------- */
+void edu_set_case(char *dst, size_t cap, const char *src, int upper) {
+    size_t n = 0;
+    if (cap == 0) return;
+    while (*src && n + 1 < cap) {
+        unsigned char c = (unsigned char)*src;
+        if (c == 0xC3 && src[1] && n + 2 < cap) { /* á é í ó ú ñ ü y sus mayúsculas (U+00C0..U+00FF) */
+            unsigned char d = (unsigned char)src[1];
+            if (upper && d >= 0xA0 && d <= 0xBE && d != 0xB7) d = (unsigned char)(d - 0x20);
+            else if (!upper && d >= 0x80 && d <= 0x9E && d != 0x97) d = (unsigned char)(d + 0x20);
+            dst[n++] = (char)c; dst[n++] = (char)d;
+            src += 2;
+            continue;
+        }
+        if (upper && c >= 'a' && c <= 'z') c = (unsigned char)(c - 'a' + 'A');
+        else if (!upper && c >= 'A' && c <= 'Z') c = (unsigned char)(c - 'A' + 'a');
+        dst[n++] = (char)c;
+        src++;
+    }
+    dst[n] = 0;
 }
 
 /* ---------- dificultad adaptable ---------- */
