@@ -72,15 +72,65 @@ void gfx_frame(SDL_Renderer *r, int x, int y, int w, int h, unsigned col, int t)
     prect(r, x1 - pt, y0, x1, y1, col);
 }
 
+/* Líneas horizontales agrupadas: menos llamadas de dibujo (importante en Vita/PSP) */
+#define SPAN_MAX 128
+static SDL_Rect span_buf[SPAN_MAX];
+static int span_n;
+static void span_flush(SDL_Renderer *r) {
+    if (span_n > 0) SDL_RenderFillRects(r, span_buf, span_n);
+    span_n = 0;
+}
+static void span(SDL_Renderer *r, int x0, int x1, int y) {
+    if (span_n >= SPAN_MAX) span_flush(r);
+    span_buf[span_n].x = x0; span_buf[span_n].y = y;
+    span_buf[span_n].w = x1 - x0 + 1; span_buf[span_n].h = 1;
+    span_n++;
+}
+
+/* Círculos suaves: texturas blancas con borde antialias (8..256 px), teñidas con el color.
+ * Se elige la menor que cabe sin ampliar mucho, para que el reescalado quede limpio. */
+#define CIRC_N 6
+static SDL_Texture *s_circ[CIRC_N];
+static const int CIRC_SIZE[CIRC_N] = { 8, 16, 32, 64, 128, 256 };
+
+static SDL_Texture *circ_texture(SDL_Renderer *r, int need, int *ts) {
+    int k = 0;
+    while (k < CIRC_N - 1 && CIRC_SIZE[k] < need) k++;
+    int n = CIRC_SIZE[k];
+    *ts = n;
+    if (s_circ[k]) return s_circ[k];
+    Uint8 *px = (Uint8 *)malloc((size_t)n * (size_t)n * 4);
+    if (!px) return NULL;
+    float rad = (float)n * 0.5f;
+    for (int y = 0; y < n; y++)
+        for (int x = 0; x < n; x++) {
+            float dx = (float)x + 0.5f - rad, dy = (float)y + 0.5f - rad;
+            float cov = rad - sqrtf(dx * dx + dy * dy) + 0.5f; /* ~1 px de borde suave */
+            if (cov < 0) cov = 0;
+            if (cov > 1) cov = 1;
+            Uint8 *q = px + ((size_t)y * (size_t)n + (size_t)x) * 4;
+            q[0] = q[1] = q[2] = 255;
+            q[3] = (Uint8)(cov * 255.0f + 0.5f);
+        }
+    SDL_Texture *t = SDL_CreateTexture(r, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, n, n);
+    if (t) {
+        SDL_UpdateTexture(t, NULL, px, n * 4);
+        SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
+    }
+    free(px);
+    s_circ[k] = t;
+    return t;
+}
+
 static void pellipse(SDL_Renderer *r, int cx, int cy, int rx, int ry, unsigned col) { /* píxeles reales */
     if (rx < 1) rx = 1;
     if (ry < 1) ry = 1;
-    gfx_setc(r, col);
-    for (int dy = -ry; dy <= ry; dy++) {
-        float t = 1.0f - (float)(dy * dy) / (float)(ry * ry);
-        int dx = (int)((float)rx * sqrtf(t > 0 ? t : 0) + 0.5f);
-        SDL_RenderDrawLine(r, cx - dx, cy + dy, cx + dx, cy + dy);
-    }
+    int ts;
+    SDL_Texture *t = circ_texture(r, 2 * (rx > ry ? rx : ry), &ts);
+    if (!t) return;
+    SDL_SetTextureColorMod(t, (Uint8)((col >> 16) & 255), (Uint8)((col >> 8) & 255), (Uint8)(col & 255));
+    SDL_Rect dst = { cx - rx, cy - ry, 2 * rx + 1, 2 * ry + 1 };
+    SDL_RenderCopy(r, t, NULL, &dst);
 }
 
 void gfx_ellipse(SDL_Renderer *r, int cx, int cy, int rx, int ry, unsigned col) {
@@ -96,12 +146,13 @@ void gfx_ring(SDL_Renderer *r, int cx, int cy, int rad, int thick, unsigned col)
         int dxo = (int)(sqrtf((float)(pr * pr - dy * dy)) + 0.5f);
         if (rin > 0 && dy > -rin && dy < rin) {
             int dxi = (int)(sqrtf((float)(rin * rin - dy * dy)) + 0.5f);
-            SDL_RenderDrawLine(r, pc - dxo, pcy + dy, pc - dxi, pcy + dy);
-            SDL_RenderDrawLine(r, pc + dxi, pcy + dy, pc + dxo, pcy + dy);
+            span(r, pc - dxo, pc - dxi, pcy + dy);
+            span(r, pc + dxi, pc + dxo, pcy + dy);
         } else {
-            SDL_RenderDrawLine(r, pc - dxo, pcy + dy, pc + dxo, pcy + dy);
+            span(r, pc - dxo, pc + dxo, pcy + dy);
         }
     }
+    span_flush(r);
 }
 
 void gfx_tri(SDL_Renderer *r, int x1, int y1, int x2, int y2, int x3, int y3, unsigned col) {
@@ -121,8 +172,9 @@ void gfx_tri(SDL_Renderer *r, int x1, int y1, int x2, int y2, int x3, int y3, un
         if (n < 2) continue;
         float lo = xs[0], hi = xs[0];
         for (int k = 1; k < n; k++) { if (xs[k] < lo) lo = xs[k]; if (xs[k] > hi) hi = xs[k]; }
-        SDL_RenderDrawLine(r, (int)lo, y, (int)(hi + 0.5f), y);
+        span(r, (int)lo, (int)(hi + 0.5f), y);
     }
+    span_flush(r);
 }
 
 void gfx_line(SDL_Renderer *r, int x1, int y1, int x2, int y2, int thick, unsigned col) {
@@ -163,20 +215,28 @@ void gfx_round_rect(SDL_Renderer *r, int x, int y, int w, int h, int rad, unsign
     prect(r, x0 + pr, y0, x1 - pr, y1, col);
     prect(r, x0, y0 + pr, x0 + pr, y1 - pr, col);
     prect(r, x1 - pr, y0 + pr, x1, y1 - pr, col);
-    pellipse(r, x0 + pr, y0 + pr, pr, pr, col);
-    pellipse(r, x1 - pr - 1, y0 + pr, pr, pr, col);
-    pellipse(r, x0 + pr, y1 - pr - 1, pr, pr, col);
-    pellipse(r, x1 - pr - 1, y1 - pr - 1, pr, pr, col);
+    if (pr < 1) return;
+    int ts;
+    SDL_Texture *t = circ_texture(r, 2 * pr, &ts);
+    if (!t) return;
+    SDL_SetTextureColorMod(t, (Uint8)((col >> 16) & 255), (Uint8)((col >> 8) & 255), (Uint8)(col & 255));
+    int hs = ts / 2;
+    SDL_Rect sTL = { 0, 0, hs, hs }, sTR = { hs, 0, hs, hs }, sBL = { 0, hs, hs, hs }, sBR = { hs, hs, hs, hs };
+    SDL_Rect dTL = { x0, y0, pr, pr }, dTR = { x1 - pr, y0, pr, pr }, dBL = { x0, y1 - pr, pr, pr }, dBR = { x1 - pr, y1 - pr, pr, pr };
+    SDL_RenderCopy(r, t, &sTL, &dTL);
+    SDL_RenderCopy(r, t, &sTR, &dTR);
+    SDL_RenderCopy(r, t, &sBL, &dBL);
+    SDL_RenderCopy(r, t, &sBR, &dBR);
 }
 
 /* ------------------------------------------------------------------ texto */
 #define CAP_H 0.70f /* altura de las mayúsculas de Outfit, en "em" */
 
 static SDL_Texture *s_tex[FONT_SIZE_COUNT];
+static SDL_Texture *s_ktex[KANA_SIZE_COUNT];
 
-static SDL_Texture *font_texture(SDL_Renderer *r, int si) {
-    if (s_tex[si]) return s_tex[si];
-    const FontSize *fs = &FONT_SIZES[si];
+static SDL_Texture *atlas_texture(SDL_Renderer *r, const FontSize *fs, SDL_Texture **slot) {
+    if (*slot) return *slot;
     size_t n = (size_t)fs->atlas_w * (size_t)fs->atlas_h;
     Uint8 *px = (Uint8 *)malloc(n * 4);
     if (!px) return NULL;
@@ -194,8 +254,22 @@ static SDL_Texture *font_texture(SDL_Renderer *r, int si) {
         SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
     }
     free(px);
-    s_tex[si] = t;
+    *slot = t;
     return t;
+}
+
+static SDL_Texture *font_texture(SDL_Renderer *r, int si) { return atlas_texture(r, &FONT_SIZES[si], &s_tex[si]); }
+
+/* hiragana: se busca en el tamaño más cercano y, si no está ahí, en el otro */
+static const FontGlyph *kana_find(float em_phys, unsigned code, int *si_out) {
+    int first = fabsf(logf(em_phys / (float)KANA_SIZES[0].em)) <= fabsf(logf(em_phys / (float)KANA_SIZES[1].em)) ? 0 : 1;
+    for (int t = 0; t < KANA_SIZE_COUNT; t++) {
+        int si = (first + t) % KANA_SIZE_COUNT;
+        const FontSize *fs = &KANA_SIZES[si];
+        for (int i = 0; i < fs->nglyphs; i++)
+            if (fs->glyphs[i].code == code) { *si_out = si; return &fs->glyphs[i]; }
+    }
+    return NULL;
 }
 
 /* tamaño embebido más cercano (en proporción) al tamaño físico pedido */
@@ -236,8 +310,17 @@ int gfx_text_width(const char *s, int size) {
     const unsigned char *p = (const unsigned char *)s;
     unsigned c;
     float w = 0;
-    while ((c = utf8_next(&p)) != 0) w += (float)find_glyph(fs, c)->adv16 / 16.0f;
-    return (int)(w * (float)size / (float)fs->em + 0.5f);
+    float kw = 0;
+    while ((c = utf8_next(&p)) != 0) {
+        if (c >= 0x3000) {
+            int ksi;
+            const FontGlyph *kg = kana_find((float)size * (s_scale > 0 ? s_scale : 1.0f), c, &ksi);
+            kw += kg ? (float)kg->adv16 / 16.0f / (float)KANA_SIZES[ksi].em * (float)size : (float)size;
+            continue;
+        }
+        w += (float)find_glyph(fs, c)->adv16 / 16.0f;
+    }
+    return (int)(w * (float)size / (float)fs->em + kw + 0.5f);
 }
 
 void gfx_text(SDL_Renderer *r, const char *s, int x, int y, int size, unsigned col) {
@@ -253,6 +336,24 @@ void gfx_text(SDL_Renderer *r, const char *s, int x, int y, int size, unsigned c
     const unsigned char *p = (const unsigned char *)s;
     unsigned c;
     while ((c = utf8_next(&p)) != 0) {
+        if (c >= 0x3000) { /* hiragana */
+            int ksi;
+            const FontGlyph *kg = kana_find(em_phys, c, &ksi);
+            if (!kg) { pen += em_phys; continue; }
+            const FontSize *kfs = &KANA_SIZES[ksi];
+            SDL_Texture *kt = atlas_texture(r, kfs, &s_ktex[ksi]);
+            float kf = em_phys / (float)kfs->em;
+            if (kt) {
+                SDL_SetTextureColorMod(kt, (Uint8)((col >> 16) & 255), (Uint8)((col >> 8) & 255), (Uint8)(col & 255));
+                SDL_Rect ks = { kg->x, kg->y, kg->w, kg->h };
+                int dw = (int)((float)kg->w * kf + 0.5f), dh = (int)((float)kg->h * kf + 0.5f);
+                SDL_Rect kd = { (int)(pen + (float)kg->xoff * kf + 0.5f), base + (int)((float)kg->yoff * kf + (kg->yoff < 0 ? -0.5f : 0.5f)),
+                                dw < 1 ? 1 : dw, dh < 1 ? 1 : dh };
+                SDL_RenderCopy(r, kt, &ks, &kd);
+            }
+            pen += (float)kg->adv16 / 16.0f * kf;
+            continue;
+        }
         const FontGlyph *g = find_glyph(fs, c);
         if (g->w > 0 && g->h > 0) {
             SDL_Rect src = { g->x, g->y, g->w, g->h };
@@ -285,17 +386,25 @@ void gfx_blob(SDL_Renderer *r, int cx, int cy, int rad, unsigned col, int mood,
     int rx = (int)((float)rad * sx), ry = (int)((float)rad * sy);
     int er = rad / 4 > 2 ? rad / 4 : 2, pr = rad / 8 > 1 ? rad / 8 : 1;
     int ex = rad / 3, ey = cy - ry / 4, po = (int)(look * (float)er * 0.5f);
-    gfx_ellipse(r, cx, cy + 1, rx + 1, ry + 1, gfx_lighten(col, -50)); /* contorno suave */
-    gfx_ellipse(r, cx, cy, rx, ry, col);
-    gfx_ellipse(r, cx - rx / 3, cy - ry / 2, rx / 4 > 1 ? rx / 4 : 1, ry / 6 > 1 ? ry / 6 : 1, gfx_lighten(col, 45)); /* brillo */
+    gfx_ellipse(r, cx, cy + 1, rx + 1, ry + 1, gfx_lighten(col, -85)); /* contorno */
+    gfx_ellipse(r, cx, cy, rx, ry, gfx_lighten(col, -28));              /* sombra de abajo */
+    if (rx > 3 && ry > 3) gfx_ellipse(r, cx - (rx > 12 ? 1 : 0), cy - (ry > 12 ? 2 : 1), rx - 2 > 1 ? rx - 2 : 1, ry - 2 > 1 ? ry - 2 : 1, col); /* cuerpo */
+    gfx_ellipse(r, cx - rx / 3, cy - ry / 2, rx / 4 > 1 ? rx / 4 : 1, ry / 6 > 1 ? ry / 6 : 1, gfx_lighten(col, 70)); /* brillo */
+    if (rad >= 12) gfx_circle(r, cx - rx / 2 - rx / 8, cy - ry / 5, rx / 14 > 1 ? rx / 14 : 1, gfx_lighten(col, 90));
     if (blink) {
         gfx_line(r, cx - ex - er, ey, cx - ex + er, ey, 1, 0x222222);
         gfx_line(r, cx + ex - er, ey, cx + ex + er, ey, 1, 0x222222);
     } else {
+        gfx_circle(r, cx - ex, ey, er + 1, 0x2B2B2B);
+        gfx_circle(r, cx + ex, ey, er + 1, 0x2B2B2B);
         gfx_circle(r, cx - ex, ey, er, 0xFFFFFF);
         gfx_circle(r, cx + ex, ey, er, 0xFFFFFF);
         gfx_circle(r, cx - ex + po, ey, pr, 0x222222);
         gfx_circle(r, cx + ex + po, ey, pr, 0x222222);
+        if (er >= 4) { /* destello en el ojo */
+            gfx_circle(r, cx - ex + po - pr / 2, ey - pr / 2, pr / 3 > 0 ? pr / 3 : 1, 0xFFFFFF);
+            gfx_circle(r, cx + ex + po - pr / 2, ey - pr / 2, pr / 3 > 0 ? pr / 3 : 1, 0xFFFFFF);
+        }
     }
     if (rad >= 10 && mood > 0) { /* mejillas */
         gfx_circle(r, cx - rx * 2 / 3, cy + ry / 5, rad / 7, gfx_lighten(col, -25));

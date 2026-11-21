@@ -1,10 +1,10 @@
 CC ?= gcc
 CFLAGS = -std=c99 -Wall -Wextra -O2
-CORE = core/edu.c core/rhythm.c core/paint.c
+CORE = core/edu.c core/rhythm.c core/paint.c core/hang.c
 PCSRC = platform/pc/main.c platform/pc/gfx.c platform/pc/audio.c platform/pc/font_data.c
 
-test: tests/test_edu.c tests/test_rhythm_paint.c $(CORE) core/edu.h core/rhythm.h core/paint.h
-	$(CC) $(CFLAGS) -o test_edu tests/test_edu.c core/edu.c
+test: tests/test_edu.c tests/test_rhythm_paint.c $(CORE) core/edu.h core/rhythm.h core/paint.h core/hang.h
+	$(CC) $(CFLAGS) -o test_edu tests/test_edu.c core/edu.c core/hang.c
 	./test_edu
 	$(CC) $(CFLAGS) -o test_rp tests/test_rhythm_paint.c $(CORE)
 	./test_rp

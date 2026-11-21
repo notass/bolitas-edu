@@ -6,7 +6,7 @@
 #define T(x1, y1, x2, y2, x3, y3)   { SH_TRI, { x1, y1, x2, y2, x3, y3 } }
 
 static const Drawing DRAWINGS[PAINT_DRAWINGS] = {
-    { { "La casa", "The house" }, 9, {
+    { { "La casa", "The house", "Etxea" }, 9, {
         R(0, 0, 300, 200),            /* 0 cielo */
         E(250, 40, 22, 22),           /* 1 sol */
         E(70, 38, 32, 14),            /* 2 nube */
@@ -17,7 +17,7 @@ static const Drawing DRAWINGS[PAINT_DRAWINGS] = {
         R(120, 115, 30, 45),          /* 7 puerta */
         R(165, 105, 25, 25),          /* 8 ventana */
     } },
-    { { "La flor", "The flower" }, 12, {
+    { { "La flor", "The flower", "Lorea" }, 12, {
         R(0, 0, 300, 200),            /* 0 cielo */
         E(45, 40, 22, 22),            /* 1 sol */
         R(0, 160, 300, 40),           /* 2 suelo */
@@ -31,7 +31,7 @@ static const Drawing DRAWINGS[PAINT_DRAWINGS] = {
         E(119, 61, 22, 22),           /* 10 pétalo */
         E(150, 70, 16, 16),           /* 11 centro */
     } },
-    { { "El cohete", "The rocket" }, 11, {
+    { { "El cohete", "The rocket", "Suziria" }, 11, {
         R(0, 0, 300, 200),            /* 0 espacio */
         E(240, 50, 28, 28),           /* 1 luna */
         E(55, 45, 7, 7),              /* 2 estrella */

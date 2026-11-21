@@ -9,7 +9,9 @@
 #define EDU_OPTIONS 4
 #define EDU_LEVELS  3
 
-typedef enum { LANG_ES = 0, LANG_EN = 1 } Lang;
+/* Idiomas de la interfaz y del contenido: castellano, inglés y euskera. */
+typedef enum { LANG_ES = 0, LANG_EN = 1, LANG_EU = 2 } Lang;
+#define LANG_COUNT 3
 
 typedef enum {
     MG_SUMAS,    /* sumas             */
@@ -24,6 +26,10 @@ typedef enum {
     MG_COLORES,  /* nombre del color  */
     MG_FORMAS,   /* nombre de la figura */
     MG_DIAS,     /* días y meses      */
+    MG_ANIMAL,   /* qué animal suena  */
+    MG_DELETREAR,/* letra que falta   */
+    MG_JAPONES,  /* palabras en japonés (hiragana) */
+    MG_KANA,     /* leer hiragana     */
     MG_COUNT
 } MiniGame;
 
@@ -51,7 +57,21 @@ typedef struct {
     char option[EDU_OPTIONS][24];     /* una opción por tambor/botón */
     int  correct;                     /* índice 0..3 de la correcta */
     int  visual_a, visual_b;          /* datos para dibujar: nº de bolitas, hora/minutos... */
+    char visual_s[16];                /* texto para dibujar: palabra con hueco, kana... */
+    char visual_r[16];                /* romaji de la palabra japonesa (se enseña tras acertar) */
 } Round;
+
+/* Animales (sonido -> nombre) y palabras para deletrear / ahorcado. */
+int         edu_animal_count(void);
+const char *edu_animal_name(int i, Lang lang);
+int         edu_word_count(void);                       /* palabras sencillas (solo a-z) */
+const char *edu_word(int i, Lang lang);                 /* minúsculas */
+/* Palabra al azar para el ahorcado: nivel 1 corta (<=4), 2 media (<=6), 3 larga. */
+void        edu_pick_word(char *dst, size_t cap, Lang lang, int level, Rng *g);
+/* Hiragana: tabla de 46 básicos + 25 con tenten/maru. */
+int         edu_kana_count(void);
+const char *edu_kana(int i);                            /* UTF-8 */
+const char *edu_kana_romaji(int i);
 
 void        edu_make_round(Round *r, MiniGame game, int level, Lang lang, Rng *g);
 const char *edu_game_name(MiniGame game, Lang lang);

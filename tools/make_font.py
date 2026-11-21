@@ -13,6 +13,10 @@ from PIL import Image, ImageDraw, ImageFont
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TTF = os.path.join(HERE, "Outfit-Bold.ttf")
+# Hiragana: Noto Sans CJK JP Bold (SIL OFL 1.1). Solo se usa para generar; el resultado va dentro de font_data.c
+KANA_TTC = os.environ.get("KANA_TTC", "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc")
+KANA_SIZES = [32, 64]
+KANA_CHARS = list("あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん") + ["ぱ", "ご"]
 OUT = os.path.join(HERE, "..", "platform", "pc", "font_data.c")
 
 SIZES = [10, 14, 20, 28, 40, 56, 80]                       # alto de la "em" en píxeles
@@ -38,11 +42,13 @@ def rle(data: bytes) -> bytes:
     return bytes(out)
 
 
-def build_size(em):
-    font = ImageFont.truetype(TTF, em)
+def build_size(em, ttf=None, chars=None, index=0):
+    ttf = ttf or TTF
+    chars = chars or CHARS
+    font = ImageFont.truetype(ttf, em, index=index)
     ascent, descent = font.getmetrics()
     glyphs = []
-    for ch in CHARS:
+    for ch in chars:
         l, t, r, b = font.getbbox(ch, anchor="ls")
         adv = font.getlength(ch)
         if r <= l or b <= t:
@@ -75,19 +81,21 @@ def build_size(em):
 
 def main():
     sizes = [build_size(s) for s in SIZES]
+    kana = [build_size(s, KANA_TTC, KANA_CHARS) for s in KANA_SIZES]
     lines = []
     w = lines.append
     w("/* GENERADO por tools/make_font.py a partir de Outfit-Bold.ttf (SIL Open Font License 1.1,")
     w(" * ver platform/pc/fonts/Outfit-OFL.txt). No editar a mano. */")
     w('#include "font_data.h"')
     w("")
-    for si, s in enumerate(sizes):
-        w(f"static const unsigned char RLE_{si}[] = {{")
+    for pre, group in (("", sizes), ("K", kana)):
+      for si, s in enumerate(group):
+        w(f"static const unsigned char {pre}RLE_{si}[] = {{")
         d = s["data"]
         for i in range(0, len(d), 24):
             w("  " + ",".join(str(b) for b in d[i:i + 24]) + ",")
         w("};")
-        w(f"static const FontGlyph GLYPHS_{si}[] = {{")
+        w(f"static const FontGlyph {pre}GLYPHS_{si}[] = {{")
         for g in s["glyphs"]:
             w("  {%d,%d,%d,%d,%d,%d,%d,%d}," % (g["code"], g["x"], g["y"], g["w"], g["h"],
                                               g["xoff"], g["yoff"], round(g["adv"] * 16)))
@@ -96,6 +104,12 @@ def main():
     w("const FontSize FONT_SIZES[FONT_SIZE_COUNT] = {")
     for si, s in enumerate(sizes):
         w("  {%d,%d,%d,%d,GLYPHS_%d,%d,RLE_%d,%d}," % (
+            s["em"], s["aw"], s["ah"], s["ascent"], si, len(s["glyphs"]), si, len(s["data"])))
+    w("};")
+    w("")
+    w("const FontSize KANA_SIZES[KANA_SIZE_COUNT] = {")
+    for si, s in enumerate(kana):
+        w("  {%d,%d,%d,%d,KGLYPHS_%d,%d,KRLE_%d,%d}," % (
             s["em"], s["aw"], s["ah"], s["ascent"], si, len(s["glyphs"]), si, len(s["data"])))
     w("};")
     text = "\n".join(lines) + "\n"

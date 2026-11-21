@@ -21,6 +21,10 @@ typedef struct {
     int rle_len;
 } FontSize;
 
+#define KANA_SIZE_COUNT 2
+
 extern const FontSize FONT_SIZES[FONT_SIZE_COUNT];
+/* hiragana básicos + ぱ ご en 2 tamaños (tools/make_font.py; Noto Sans CJK JP Bold, SIL OFL) */
+extern const FontSize KANA_SIZES[KANA_SIZE_COUNT];
 
 #endif

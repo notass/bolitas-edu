@@ -17,7 +17,7 @@ typedef enum { SH_RECT = 0, SH_ELLIPSE = 1, SH_TRI = 2 } ShapeKind;
 typedef struct { ShapeKind kind; short v[6]; } Region;
 
 typedef struct {
-    const char *name[2];             /* es, en */
+    const char *name[3];             /* es, en, eu */
     int n;
     Region reg[PAINT_MAX_REGIONS];   /* orden de dibujo: la última queda encima */
 } Drawing;

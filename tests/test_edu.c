@@ -1,4 +1,5 @@
 #include "../core/edu.h"
+#include "../core/hang.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,7 +11,7 @@ int main(void) {
     Rng g; rng_seed(&g, 12345);
     long rounds = 0;
     for (int game = 0; game < MG_COUNT; game++)
-    for (int lang = 0; lang < 2; lang++)
+    for (int lang = 0; lang < LANG_COUNT; lang++)
     for (int level = 1; level <= EDU_LEVELS; level++)
     for (int it = 0; it < 3000; it++, rounds++) {
         Round r; edu_make_round(&r, (MiniGame)game, level, (Lang)lang, &g);
@@ -65,12 +66,14 @@ int main(void) {
             CHECK(r.option[r.correct][0] == c && r.option[r.correct][1] == 0, "letra %c: %s", c, r.prompt);
             break; }
         case MG_DIAS: {
-            static const char *D[2][7] = {
+            static const char *D[3][7] = {
                 {"lunes","martes","miércoles","jueves","viernes","sábado","domingo"},
-                {"Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"} };
-            static const char *M[2][12] = {
+                {"Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"},
+                {"astelehena","asteartea","asteazkena","osteguna","ostirala","larunbata","igandea"} };
+            static const char *M[3][12] = {
                 {"enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"},
-                {"January","February","March","April","May","June","July","August","September","October","November","December"} };
+                {"January","February","March","April","May","June","July","August","September","October","November","December"},
+                {"urtarrila","otsaila","martxoa","apirila","maiatza","ekaina","uztaila","abuztua","iraila","urria","azaroa","abendua"} };
             int months = r.visual_b >> 1, after = r.visual_b & 1, n = months ? 12 : 7;
             const char *base = months ? M[lang][r.visual_a] : D[lang][r.visual_a];
             const char *want = months ? M[lang][(r.visual_a + (after ? 1 : n - 1)) % n]
@@ -79,7 +82,54 @@ int main(void) {
             CHECK(strcmp(r.option[r.correct], want) == 0, "dias: %s -> %s", r.prompt, r.option[r.correct]);
             CHECK(months == (level == 3), "dias/meses por nivel");
             break; }
+        case MG_ANIMAL:
+            CHECK(strcmp(r.option[r.correct], edu_animal_name(r.visual_a, (Lang)lang)) == 0, "animal");
+            CHECK(r.visual_a < edu_animal_count(), "animal fuera de rango");
+            break;
+        case MG_DELETREAR: {
+            char w[32]; snprintf(w, sizeof w, "%s", r.visual_s);
+            char *u = strchr(w, '_');
+            CHECK(u && !strchr(u + 1, '_'), "deletrear: un hueco (%s)", r.visual_s);
+            if (u) {
+                *u = (char)(r.option[r.correct][0] - 'A' + 'a');
+                int known = 0;
+                for (int i = 0; i < edu_word_count(); i++) if (strcmp(edu_word(i, (Lang)lang), w) == 0) known = 1;
+                CHECK(known, "deletrear: palabra desconocida %s", w);
+                CHECK((int)(u - w) == r.visual_a, "deletrear: posicion");
+            }
+            break; }
+        case MG_JAPONES: {
+            int ok = 0;
+            CHECK(r.visual_s[0] && r.visual_r[0], "japones: kana/romaji vacios");
+            for (int i = 0; i < 4; i++) ok += strlen(r.option[i]) > 0;
+            CHECK(ok == 4, "japones: opciones");
+            break; }
+        case MG_KANA:
+            CHECK(strcmp(r.visual_s, edu_kana(r.visual_a)) == 0 && strcmp(r.option[r.correct], edu_kana_romaji(r.visual_a)) == 0, "kana");
+            CHECK(r.visual_a < (level == 1 ? 10 : (level == 2 ? 25 : 46)), "kana fuera del nivel");
+            break;
         default: break;
+        }
+    }
+    /* ahorcado */
+    {
+        Hang h; hang_set_word(&h, "gato");
+        CHECK(hang_guess(&h, 'g' - 'a') == HANG_HIT && hang_revealed(&h, 0) && !hang_revealed(&h, 1), "ahorcado acierto");
+        CHECK(hang_guess(&h, 'g' - 'a') == HANG_REPEAT, "ahorcado repetida");
+        CHECK(hang_guess(&h, 'z' - 'a') == HANG_BAD && h.wrong == 1, "ahorcado fallo");
+        hang_guess(&h, 'a' - 'a'); hang_guess(&h, 't' - 'a');
+        CHECK(h.state == HANG_PLAYING, "ahorcado aun jugando");
+        hang_guess(&h, 'o' - 'a');
+        CHECK(h.state == HANG_WON, "ahorcado ganada");
+        hang_set_word(&h, "sol");
+        for (int i = 0; i < HANG_LIVES; i++) hang_guess(&h, 'z' - 'a' - i);
+        CHECK(h.state == HANG_LOST && h.wrong == HANG_LIVES, "ahorcado perdida (%d fallos)", h.wrong);
+        CHECK(hang_guess(&h, 's' - 'a') == HANG_REPEAT, "ahorcado tras perder");
+        for (int lang = 0; lang < LANG_COUNT; lang++) for (int lv = 1; lv <= 3; lv++) for (int it = 0; it < 200; it++) {
+            hang_init(&h, (Lang)lang, lv, &g);
+            int n = hang_len(&h), bad = n < 3 || n > 12;
+            for (int i = 0; i < n; i++) if (h.word[i] < 'a' || h.word[i] > 'z') bad = 1;
+            CHECK(!bad, "ahorcado palabra invalida '%s'", h.word);
         }
     }
     /* dificultad adaptable */

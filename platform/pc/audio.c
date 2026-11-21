@@ -18,6 +18,7 @@ typedef struct {
 static Voice s_v[NV];
 static SDL_AudioDeviceID s_dev;
 static unsigned s_noise = 12345u;
+static int s_muted;
 
 static float noise(void) {
     s_noise = s_noise * 1664525u + 1013904223u;
@@ -73,7 +74,7 @@ void audio_close(void) {
 int audio_ok(void) { return s_dev != 0; }
 
 static void voice(float f0, float f1, float vol, float dur, int kind, float delay_s) {
-    if (!s_dev) return;
+    if (!s_dev || s_muted) return;
     SDL_LockAudioDevice(s_dev);
     int slot = 0;
     float oldest = -1.0f;
@@ -107,3 +108,37 @@ void sfx_win(void) {
 }
 
 void sfx_pop(void) { voice(900.0f, 1300.0f, 0.4f, 0.06f, 0, 0); }
+
+void audio_set_muted(int muted) { s_muted = muted ? 1 : 0; }
+int audio_muted(void) { return s_muted; }
+
+/* Sonidos de animales hechos con tonos: no son grabaciones, pero se distinguen bien. */
+void sfx_animal(int i) {
+    switch (i) {
+    case 0: /* gato: miau */
+        voice(450, 800, 0.55f, 0.16f, 0, 0); voice(800, 900, 0.55f, 0.18f, 0, 0.16f); voice(900, 420, 0.5f, 0.3f, 0, 0.34f);
+        break;
+    case 1: /* perro: guau guau */
+        voice(420, 180, 0.9f, 0.14f, 1, 0); voice(380, 160, 0.9f, 0.16f, 1, 0.3f); break;
+    case 2: /* vaca: muuu */
+        voice(150, 135, 0.7f, 0.9f, 2, 0); voice(300, 270, 0.25f, 0.9f, 0, 0); break;
+    case 3: /* pato: cuac cuac */
+        voice(520, 300, 0.6f, 0.11f, 2, 0); voice(520, 300, 0.6f, 0.11f, 2, 0.17f); voice(500, 280, 0.6f, 0.11f, 2, 0.4f); break;
+    case 4: /* oveja: beee (dos tonos casi iguales hacen temblar) */
+        voice(340, 320, 0.45f, 0.7f, 2, 0); voice(352, 332, 0.45f, 0.7f, 2, 0); break;
+    case 5: /* rana: crooac */
+        for (int k = 0; k < 4; k++) voice(140.0f + 20.0f * (float)k, 220.0f, 0.6f, 0.07f, 2, 0.09f * (float)k);
+        break;
+    case 6: /* pollito: pío pío */
+        for (int k = 0; k < 4; k++) voice(1900, 2700, 0.35f, 0.07f, 0, 0.14f * (float)k);
+        break;
+    case 7: /* caballo: iiijijiii */
+        voice(700, 1500, 0.5f, 0.25f, 0, 0); voice(1500, 600, 0.5f, 0.45f, 2, 0.25f); voice(1100, 1500, 0.3f, 0.2f, 0, 0.7f); break;
+    case 8: /* cerdo: oinc oinc */
+        voice(230, 110, 0.8f, 0.14f, 1, 0); voice(210, 100, 0.8f, 0.16f, 1, 0.25f); break;
+    default: /* gallo: quiquiriquí */
+        voice(550, 850, 0.5f, 0.15f, 0, 0); voice(850, 650, 0.5f, 0.12f, 0, 0.17f);
+        voice(650, 1100, 0.5f, 0.18f, 0, 0.32f); voice(1100, 500, 0.5f, 0.45f, 0, 0.52f); break;
+    }
+}
+
