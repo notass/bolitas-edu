@@ -32,3 +32,15 @@ jobs:
         with:
           name: EBOOT-PSP
           path: platform/psp/EBOOT.PBP
+
+  vita:
+    runs-on: ubuntu-latest
+    container: vitasdk/vitasdk:latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S platform/vita -B build-vita
+      - run: cmake --build build-vita
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Bolitas-Vita-vpk
+          path: build-vita/bolitas_edu.vpk
